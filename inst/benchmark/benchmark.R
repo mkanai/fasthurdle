@@ -213,8 +213,8 @@ create_markdown_table <- function(plot_data) {
 }
 
 # Save plots
-ggsave("man/figures/benchmark_time.png", summary_results$plots$time, width = 10, height = 6)
-ggsave("man/figures/benchmark_speedup.png", summary_results$plots$speedup, width = 10, height = 6)
+ggsave("man/figures/benchmark_time.png", summary_results$plots$time, width = 10, height = 6, bg = "white")
+ggsave("man/figures/benchmark_speedup.png", summary_results$plots$speedup, width = 10, height = 6, bg = "white")
 
 # Create and save markdown table
 md_table <- create_markdown_table(summary_results$summary)

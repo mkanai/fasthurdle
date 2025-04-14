@@ -133,7 +133,7 @@ namespace links
     }
 }
 
-// Helper function for negative binomial log probability (already defined in likelihood.cpp)
+// Helper function for negative binomial log probability
 inline double dnbinom_log(double y, double size, double mu)
 {
     return lgamma(y + size) - lgamma(size) - lgamma(y + 1) +
