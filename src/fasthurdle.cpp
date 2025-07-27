@@ -153,9 +153,15 @@ protected:
     arma::uvec Y0;
     arma::uvec Y1;
 
+    // Cache for incremental updates
+    mutable arma::vec cached_mu;
+    mutable arma::vec cached_Xbeta;
+    mutable arma::vec prev_beta;
+    mutable bool cache_initialized;
+
 public:
     LikelihoodFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w)
-        : Y(y), X(x), offset(offs), weights(w)
+        : Y(y), X(x), offset(offs), weights(w), cache_initialized(false)
     {
         // Pre-compute indicator vectors
         Y0 = find(Y <= 0);
@@ -171,6 +177,53 @@ public:
     arma::vec calculate_mu(const arma::vec &eta) const
     {
         return exp(eta);
+    }
+
+    // Cached version of calculate_mu that avoids recalculation
+    arma::vec calculate_mu_cached(const arma::vec &beta) const
+    {
+        if (!cache_initialized)
+        {
+            // First time - full calculation
+            cached_Xbeta = X * beta;
+            cached_mu = exp(cached_Xbeta + offset);
+            prev_beta = beta;
+            cache_initialized = true;
+            return cached_mu;
+        }
+
+        // Check if beta has changed significantly
+        arma::vec delta_beta = beta - prev_beta;
+        double relative_change = norm(delta_beta, 2) / (norm(beta, 2) + 1e-8);
+
+        if (relative_change < 0.1)
+        {
+            // Small change - incremental update
+            arma::vec delta_Xbeta = X * delta_beta;
+            cached_Xbeta += delta_Xbeta;
+
+            // Use Taylor expansion for small changes: exp(a+h) ≈ exp(a)(1+h) for small h
+            arma::vec h = delta_Xbeta;
+            cached_mu = cached_mu % (1.0 + h);
+
+            // Ensure positivity
+            cached_mu = clamp(cached_mu, 1e-10, datum::inf);
+        }
+        else
+        {
+            // Large change - full recalculation
+            cached_Xbeta = X * beta;
+            cached_mu = exp(cached_Xbeta + offset);
+        }
+
+        prev_beta = beta;
+        return cached_mu;
+    }
+
+    // Reset cache (useful when switching optimization methods)
+    void reset_cache() const
+    {
+        cache_initialized = false;
     }
 
     // Virtual destructor for proper cleanup in derived classes
@@ -192,8 +245,9 @@ public:
             return 0.0;
         }
 
-        // Calculate mu = exp(X * parms + offset) for Y>0 observations
-        arma::vec mu = calculate_mu(X.rows(Y1) * parms + offset.elem(Y1));
+        // Calculate mu using cached version for full data
+        arma::vec mu_full = calculate_mu_cached(parms);
+        arma::vec mu = mu_full.elem(Y1);
 
         // Calculate log probability of zero: loglik0 = -mu
         arma::vec loglik0 = -mu;
@@ -227,11 +281,12 @@ public:
             return;
         }
 
-        // Calculate eta = X * parms + offset for Y>0 observations
-        arma::vec eta = X.rows(Y1) * parms + offset.elem(Y1);
+        // Calculate mu using cached version for full data
+        arma::vec mu_full = calculate_mu_cached(parms);
+        arma::vec mu = mu_full.elem(Y1);
 
-        // Calculate mu = exp(eta)
-        arma::vec mu = calculate_mu(eta);
+        // Calculate eta for Y>0 observations
+        arma::vec eta = cached_Xbeta.elem(Y1) + offset.elem(Y1);
 
         // Get Y values for positive observations
         arma::vec Y_pos = Y.elem(Y1);
@@ -266,8 +321,9 @@ public:
             return 0.0;
         }
 
-        // Calculate mu = exp(X * parms[0:kx-1] + offset) for Y>0 observations
-        arma::vec mu = calculate_mu(X.rows(Y1) * parms.subvec(0, kx - 1) + offset.elem(Y1));
+        // Calculate mu using cached version for full data
+        arma::vec mu_full = calculate_mu_cached(parms.subvec(0, kx - 1));
+        arma::vec mu = mu_full.elem(Y1);
 
         // Calculate theta = exp(parms[kx])
         double theta = exp(parms(kx));
@@ -311,11 +367,12 @@ public:
             return;
         }
 
-        // Calculate eta = X * parms[0:kx-1] + offset for Y>0 observations
-        arma::vec eta = X.rows(Y1) * parms.subvec(0, kx - 1) + offset.elem(Y1);
+        // Calculate mu using cached version for full data
+        arma::vec mu_full = calculate_mu_cached(parms.subvec(0, kx - 1));
+        arma::vec mu = mu_full.elem(Y1);
 
-        // Calculate mu = exp(eta)
-        arma::vec mu = calculate_mu(eta);
+        // Calculate eta for Y>0 observations
+        arma::vec eta = cached_Xbeta.elem(Y1) + offset.elem(Y1);
 
         // Calculate theta = exp(parms[kx])
         double theta = exp(parms(kx));
@@ -397,11 +454,12 @@ public:
             return;
         }
 
-        // Calculate eta = X * parms + offset for Y>0 observations
-        arma::vec eta = X.rows(Y1) * parms + offset.elem(Y1);
+        // Calculate mu using cached version for full data
+        arma::vec mu_full = calculate_mu_cached(parms);
+        arma::vec mu = mu_full.elem(Y1);
 
-        // Calculate mu = exp(eta)
-        arma::vec mu = exp(eta);
+        // Calculate eta for Y>0 observations
+        arma::vec eta = cached_Xbeta.elem(Y1) + offset.elem(Y1);
 
         // Get Y values for positive observations
         arma::vec Y_pos = Y.elem(Y1);
@@ -437,9 +495,8 @@ public:
 
     double operator()(const arma::vec &parms) override
     {
-        // Calculate mu = exp(X * parms + offset)
-        arma::vec eta = calculate_eta(parms);
-        arma::vec mu = calculate_mu(eta);
+        // Calculate mu using cached version
+        arma::vec mu = calculate_mu_cached(parms);
 
         // Calculate log probability of zero: loglik0 = -mu
         arma::vec loglik0 = -mu;
@@ -466,11 +523,11 @@ public:
 
     void Gradient(const arma::vec &parms, arma::vec &grad) override
     {
-        // Calculate eta = X * parms + offset
-        arma::vec eta = calculate_eta(parms);
+        // Calculate mu using cached version
+        arma::vec mu = calculate_mu_cached(parms);
 
-        // Calculate mu = exp(eta)
-        arma::vec mu = calculate_mu(eta);
+        // Get eta from cache
+        arma::vec eta = cached_Xbeta + offset;
 
         // Initialize gradient term
         arma::vec grad_term = arma::zeros<arma::vec>(X.n_rows);
@@ -511,8 +568,8 @@ public:
         // Get number of parameters
         int kz = X.n_cols;
 
-        // Calculate mu = exp(X * parms[0:kz-1] + offset)
-        arma::vec mu = calculate_mu(X * parms.subvec(0, kz - 1) + offset);
+        // Calculate mu using cached version
+        arma::vec mu = calculate_mu_cached(parms.subvec(0, kz - 1));
 
         // Calculate theta = exp(parms[kz])
         double theta = exp(parms(kz));
@@ -545,11 +602,11 @@ public:
         // Get number of parameters
         int kz = X.n_cols;
 
-        // Calculate eta = X * parms[0:kz-1] + offset
-        arma::vec eta = X * parms.subvec(0, kz - 1) + offset;
+        // Calculate mu using cached version
+        arma::vec mu = calculate_mu_cached(parms.subvec(0, kz - 1));
 
-        // Calculate mu = exp(eta)
-        arma::vec mu = calculate_mu(eta);
+        // Get eta from cache
+        arma::vec eta = cached_Xbeta + offset;
 
         // Calculate theta = exp(parms[kz])
         double theta = exp(parms(kz));
@@ -661,6 +718,49 @@ private:
     links::LinkFunction mu_eta_func;
     std::string link_name;
 
+    // Override cached mu calculation for non-exp link functions
+    arma::vec calculate_mu_cached_binom(const arma::vec &beta) const
+    {
+        if (!cache_initialized)
+        {
+            // First time - full calculation
+            cached_Xbeta = X * beta;
+            arma::vec eta = cached_Xbeta + offset;
+            cached_mu = linkinv_func(eta);
+            prev_beta = beta;
+            cache_initialized = true;
+            return cached_mu;
+        }
+
+        // Check if beta has changed significantly
+        arma::vec delta_beta = beta - prev_beta;
+        double relative_change = norm(delta_beta, 2) / (norm(beta, 2) + 1e-8);
+
+        if (relative_change < 0.1 && link_name == "logit")
+        {
+            // Small change for logit link - use approximation
+            arma::vec delta_Xbeta = X * delta_beta;
+            cached_Xbeta += delta_Xbeta;
+
+            // For logit: d/dx[1/(1+exp(-x))] = exp(-x)/(1+exp(-x))^2 = mu(1-mu)
+            arma::vec mu_deriv = cached_mu % (1.0 - cached_mu);
+            cached_mu = cached_mu + mu_deriv % delta_Xbeta;
+
+            // Ensure bounds [0,1]
+            cached_mu = clamp(cached_mu, 1e-10, 1.0 - 1e-10);
+        }
+        else
+        {
+            // Large change or non-logit link - full recalculation
+            cached_Xbeta = X * beta;
+            arma::vec eta = cached_Xbeta + offset;
+            cached_mu = linkinv_func(eta);
+        }
+
+        prev_beta = beta;
+        return cached_mu;
+    }
+
 public:
     ZeroBinomFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w,
                      const std::string &link = "logit")
@@ -672,11 +772,8 @@ public:
 
     double operator()(const arma::vec &parms) override
     {
-        // Calculate eta = X * parms + offset
-        arma::vec eta = calculate_eta(parms);
-
-        // Calculate mu = linkinv(eta)
-        arma::vec mu = linkinv_func(eta);
+        // Calculate mu using cached version for binomial link
+        arma::vec mu = calculate_mu_cached_binom(parms);
 
         // Calculate log-likelihood
         double loglik = 0.0;
@@ -701,11 +798,11 @@ public:
 
     void Gradient(const arma::vec &parms, arma::vec &grad) override
     {
-        // Calculate eta = X * parms + offset
-        arma::vec eta = calculate_eta(parms);
+        // Calculate mu using cached version for binomial link
+        arma::vec mu = calculate_mu_cached_binom(parms);
 
-        // Calculate mu = linkinv(eta)
-        arma::vec mu = linkinv_func(eta);
+        // Get eta from cache
+        arma::vec eta = cached_Xbeta + offset;
 
         // Calculate mu_eta (derivative of mu with respect to eta)
         arma::vec mu_eta_vec = mu_eta_func(eta);
