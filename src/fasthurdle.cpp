@@ -158,6 +158,18 @@ protected:
     mutable arma::vec cached_Xbeta;
     mutable arma::vec prev_beta;
     mutable bool cache_initialized;
+    
+    // Extended caching for expensive operations
+    mutable std::unordered_map<double, double> lgamma_cache;
+    mutable std::unordered_map<double, double> digamma_cache;
+    
+    // Cache matrix subsets
+    mutable arma::mat X_Y1;
+    mutable arma::mat X_Y0;
+    mutable arma::vec weights_Y1;
+    mutable arma::vec weights_Y0;
+    mutable arma::vec offset_Y1;
+    mutable arma::vec offset_Y0;
 
 public:
     LikelihoodFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w)
@@ -166,6 +178,18 @@ public:
         // Pre-compute indicator vectors
         Y0 = find(Y <= 0);
         Y1 = find(Y > 0);
+        
+        // Pre-cache matrix subsets to avoid repeated subsetting
+        if (Y1.n_elem > 0) {
+            X_Y1 = X.rows(Y1);
+            weights_Y1 = weights.elem(Y1);
+            offset_Y1 = offset.elem(Y1);
+        }
+        if (Y0.n_elem > 0) {
+            X_Y0 = X.rows(Y0);
+            weights_Y0 = weights.elem(Y0);
+            offset_Y0 = offset.elem(Y0);
+        }
     }
 
     // Common utility functions
@@ -221,9 +245,34 @@ public:
     }
 
     // Reset cache (useful when switching optimization methods)
-    void reset_cache() const
+    virtual void reset_cache() const
     {
         cache_initialized = false;
+        lgamma_cache.clear();
+        digamma_cache.clear();
+    }
+    
+    // Cached special functions
+    double cached_lgamma(double x) const
+    {
+        auto it = lgamma_cache.find(x);
+        if (it != lgamma_cache.end()) {
+            return it->second;
+        }
+        double result = lgamma(x);
+        lgamma_cache[x] = result;
+        return result;
+    }
+    
+    double cached_digamma(double x) const
+    {
+        auto it = digamma_cache.find(x);
+        if (it != digamma_cache.end()) {
+            return it->second;
+        }
+        double result = R::digamma(x);
+        digamma_cache[x] = result;
+        return result;
     }
 
     // Virtual destructor for proper cleanup in derived classes
@@ -256,17 +305,17 @@ public:
         arma::vec Y_pos = Y.elem(Y1);
 
         // Vectorized log probability of Y[Y1]: dpois(y, lambda, log) = y * log(lambda) - lambda - lgamma(y + 1)
-        // First compute lgamma for Y_pos + 1
+        // Use cached lgamma for Y_pos + 1
         arma::vec lgamma_y_1(Y1.n_elem);
         for (size_t i = 0; i < Y1.n_elem; i++)
         {
-            lgamma_y_1(i) = lgamma(Y_pos(i) + 1.0);
+            lgamma_y_1(i) = cached_lgamma(Y_pos(i) + 1.0);
         }
 
         arma::vec loglik1 = Y_pos % log(mu) - mu - lgamma_y_1;
 
-        // Calculate log-likelihood
-        double loglik = sum(weights.elem(Y1) % loglik1) - sum(weights.elem(Y1) % log(1.0 - exp(loglik0)));
+        // Calculate log-likelihood using cached weights
+        double loglik = sum(weights_Y1 % loglik1) - sum(weights_Y1 % log(1.0 - exp(loglik0)));
 
         // Return negative log-likelihood for minimization
         return -loglik;
@@ -286,7 +335,7 @@ public:
         arma::vec mu = mu_full.elem(Y1);
 
         // Calculate eta for Y>0 observations
-        arma::vec eta = cached_Xbeta.elem(Y1) + offset.elem(Y1);
+        arma::vec eta = cached_Xbeta.elem(Y1) + offset_Y1;
 
         // Get Y values for positive observations
         arma::vec Y_pos = Y.elem(Y1);
@@ -295,20 +344,53 @@ public:
         arma::vec loglik0 = -mu; // log probability of zero
         arma::vec grad_term = Y_pos - mu - exp(loglik0 - log(1.0 - exp(loglik0)) + eta);
 
-        // Single matrix multiplication instead of loop
-        grad = X.rows(Y1).t() * (weights.elem(Y1) % grad_term);
+        // Single matrix multiplication using cached matrix subset
+        grad = X_Y1.t() * (weights_Y1 % grad_term);
 
         // Return negative gradient for minimization
         grad = -grad;
     }
 };
 
+// Base class for Negative Binomial functors with theta caching
+class NegBinLikelihoodFunctor : public LikelihoodFunctor
+{
+protected:
+    // Cache for theta-related calculations
+    mutable double cached_theta;
+    mutable double cached_log_theta;
+    mutable double cached_lgamma_theta;
+    mutable double cached_digamma_theta;
+    mutable bool theta_cache_initialized;
+    
+    void update_theta_cache(double theta) const
+    {
+        if (!theta_cache_initialized || std::abs(theta - cached_theta) > 1e-10) {
+            cached_theta = theta;
+            cached_log_theta = log(theta);
+            cached_lgamma_theta = cached_lgamma(theta);
+            cached_digamma_theta = cached_digamma(theta);
+            theta_cache_initialized = true;
+        }
+    }
+    
+    void reset_cache() const override
+    {
+        LikelihoodFunctor::reset_cache();
+        theta_cache_initialized = false;
+    }
+    
+public:
+    NegBinLikelihoodFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w)
+        : LikelihoodFunctor(y, x, offs, w), theta_cache_initialized(false) {}
+};
+
 // Count model Negative Binomial functor
-class CountNegBinFunctor : public LikelihoodFunctor
+class CountNegBinFunctor : public NegBinLikelihoodFunctor
 {
 public:
     CountNegBinFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w)
-        : LikelihoodFunctor(y, x, offs, w) {}
+        : NegBinLikelihoodFunctor(y, x, offs, w) {}
 
     double operator()(const arma::vec &parms) override
     {
@@ -327,29 +409,32 @@ public:
 
         // Calculate theta = exp(parms[kx])
         double theta = exp(parms(kx));
+        
+        // Update theta cache
+        update_theta_cache(theta);
 
         // Get Y values for positive observations
         arma::vec Y_pos = Y.elem(Y1);
 
-        // Vectorized log probability of zero
-        arma::vec loglik0 = theta * log(theta) - theta * log(theta + mu);
+        // Vectorized log probability of zero using cached log(theta)
+        arma::vec loglik0 = theta * cached_log_theta - theta * log(theta + mu);
 
         // Vectorized log probability of Y[Y1]
-        // First compute lgamma for vectors
+        // Use cached lgamma for vectors
         arma::vec lgamma_y_theta(Y1.n_elem);
         arma::vec lgamma_y_1(Y1.n_elem);
         for (size_t i = 0; i < Y1.n_elem; i++)
         {
-            lgamma_y_theta(i) = lgamma(Y_pos(i) + theta);
-            lgamma_y_1(i) = lgamma(Y_pos(i) + 1.0);
+            lgamma_y_theta(i) = cached_lgamma(Y_pos(i) + theta);
+            lgamma_y_1(i) = cached_lgamma(Y_pos(i) + 1.0);
         }
 
-        // Vectorized negative binomial log probability
-        arma::vec loglik1 = lgamma_y_theta - lgamma(theta) - lgamma_y_1 +
+        // Vectorized negative binomial log probability using cached lgamma_theta
+        arma::vec loglik1 = lgamma_y_theta - cached_lgamma_theta - lgamma_y_1 +
                             Y_pos % log(mu) - (Y_pos + theta) % log(mu + theta);
 
-        // Calculate log-likelihood
-        double loglik = sum(weights.elem(Y1) % loglik1) - sum(weights.elem(Y1) % log(1.0 - exp(loglik0)));
+        // Calculate log-likelihood using cached weights
+        double loglik = sum(weights_Y1 % loglik1) - sum(weights_Y1 % log(1.0 - exp(loglik0)));
 
         // Return negative log-likelihood for minimization
         return -loglik;
@@ -372,13 +457,16 @@ public:
         arma::vec mu = mu_full.elem(Y1);
 
         // Calculate eta for Y>0 observations
-        arma::vec eta = cached_Xbeta.elem(Y1) + offset.elem(Y1);
+        arma::vec eta = cached_Xbeta.elem(Y1) + offset_Y1;
 
         // Calculate theta = exp(parms[kx])
         double theta = exp(parms(kx));
+        
+        // Update theta cache
+        update_theta_cache(theta);
 
-        // Vectorized calculation of log probability of zero
-        arma::vec loglik0 = theta * log(theta) - theta * log(theta + mu);
+        // Vectorized calculation of log probability of zero using cached log(theta)
+        arma::vec loglik0 = theta * cached_log_theta - theta * log(theta + mu);
 
         // Calculate logratio = log(p0/(1-p0))
         arma::vec logratio = loglik0 - log(1.0 - exp(loglik0));
@@ -386,35 +474,33 @@ public:
         // Get Y values for positive observations
         arma::vec Y_pos = Y.elem(Y1);
 
-        // Vectorized gradient calculation for beta parameters
+        // Vectorized gradient calculation for beta parameters using cached log(theta)
         arma::vec grad_term = Y_pos - mu % (Y_pos + theta) / (mu + theta) -
-                              exp(logratio + log(theta) - log(mu + theta) + eta);
+                              exp(logratio + cached_log_theta - log(mu + theta) + eta);
 
-        // Single matrix multiplication instead of loop
-        arma::vec grad_beta = X.rows(Y1).t() * (weights.elem(Y1) % grad_term);
+        // Single matrix multiplication using cached matrix subset
+        arma::vec grad_beta = X_Y1.t() * (weights_Y1 % grad_term);
 
         // Vectorized gradient calculation for log(theta)
         arma::vec mu_plus_theta = mu + theta;
         arma::vec log_mu_plus_theta = log(mu_plus_theta);
 
-        // Vectorized digamma for Y_pos + theta
+        // Use cached digamma for Y_pos + theta
         arma::vec digamma_y_theta(Y1.n_elem);
         for (size_t i = 0; i < Y1.n_elem; i++)
         {
-            digamma_y_theta(i) = R::digamma(Y_pos(i) + theta);
+            digamma_y_theta(i) = cached_digamma(Y_pos(i) + theta);
         }
 
-        double digamma_theta = R::digamma(theta);
-
-        // Vectorized first term for grad_logtheta
-        arma::vec term3 = digamma_y_theta - digamma_theta + log(theta) - log_mu_plus_theta +
+        // Vectorized first term for grad_logtheta using cached values
+        arma::vec term3 = digamma_y_theta - cached_digamma_theta + cached_log_theta - log_mu_plus_theta +
                           1.0 - (Y_pos + theta) / mu_plus_theta;
 
-        // Vectorized second term for grad_logtheta
-        arma::vec term4 = exp(logratio) % (log(theta) - log_mu_plus_theta + 1.0 - theta / mu_plus_theta);
+        // Vectorized second term for grad_logtheta using cached log(theta)
+        arma::vec term4 = exp(logratio) % (cached_log_theta - log_mu_plus_theta + 1.0 - theta / mu_plus_theta);
 
-        // Sum with weights
-        double grad_logtheta = theta * sum(weights.elem(Y1) % (term3 + term4));
+        // Sum with cached weights
+        double grad_logtheta = theta * sum(weights_Y1 % (term3 + term4));
 
         // Combine gradients
         grad = arma::zeros<arma::vec>(parms.n_elem);
@@ -459,7 +545,7 @@ public:
         arma::vec mu = mu_full.elem(Y1);
 
         // Calculate eta for Y>0 observations
-        arma::vec eta = cached_Xbeta.elem(Y1) + offset.elem(Y1);
+        arma::vec eta = cached_Xbeta.elem(Y1) + offset_Y1;
 
         // Get Y values for positive observations
         arma::vec Y_pos = Y.elem(Y1);
@@ -478,8 +564,8 @@ public:
         // Vectorized gradient calculation
         arma::vec grad_term = term1 - term2;
 
-        // Single matrix multiplication
-        grad = X.rows(Y1).t() * (weights.elem(Y1) % grad_term);
+        // Single matrix multiplication using cached matrix subset
+        grad = X_Y1.t() * (weights_Y1 % grad_term);
 
         // Return negative gradient for minimization
         grad = -grad;
@@ -507,14 +593,14 @@ public:
         // For Y=0 observations: sum(weights[Y0] * loglik0[Y0])
         if (Y0.n_elem > 0)
         {
-            loglik += sum(weights.elem(Y0) % loglik0.elem(Y0));
+            loglik += sum(weights_Y0 % loglik0.elem(Y0));
         }
 
         // For Y>0 observations: sum(weights[Y1] * log(1 - exp(loglik0[Y1])))
         if (Y1.n_elem > 0)
         {
             arma::vec temp = log(1.0 - exp(loglik0.elem(Y1)));
-            loglik += sum(weights.elem(Y1) % temp);
+            loglik += sum(weights_Y1 % temp);
         }
 
         // Return negative log-likelihood for minimization
@@ -557,11 +643,11 @@ public:
 };
 
 // Zero hurdle Negative Binomial functor
-class ZeroNegBinFunctor : public LikelihoodFunctor
+class ZeroNegBinFunctor : public NegBinLikelihoodFunctor
 {
 public:
     ZeroNegBinFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w)
-        : LikelihoodFunctor(y, x, offs, w) {}
+        : NegBinLikelihoodFunctor(y, x, offs, w) {}
 
     double operator()(const arma::vec &parms) override
     {
@@ -573,24 +659,27 @@ public:
 
         // Calculate theta = exp(parms[kz])
         double theta = exp(parms(kz));
+        
+        // Update theta cache
+        update_theta_cache(theta);
 
         // Calculate log-likelihood
         double loglik = 0.0;
 
-        // Vectorized log probability of zero
-        arma::vec loglik0 = theta * log(theta) - theta * log(theta + mu);
+        // Vectorized log probability of zero using cached log(theta)
+        arma::vec loglik0 = theta * cached_log_theta - theta * log(theta + mu);
 
         // For Y=0 observations: sum(weights[Y0] * loglik0[Y0])
         if (Y0.n_elem > 0)
         {
-            loglik += sum(weights.elem(Y0) % loglik0.elem(Y0));
+            loglik += sum(weights_Y0 % loglik0.elem(Y0));
         }
 
         // For Y>0 observations: sum(weights[Y1] * log(1 - exp(loglik0[Y1])))
         if (Y1.n_elem > 0)
         {
             arma::vec temp = log(1.0 - exp(loglik0.elem(Y1)));
-            loglik += sum(weights.elem(Y1) % temp);
+            loglik += sum(weights_Y1 % temp);
         }
 
         // Return negative log-likelihood for minimization
@@ -610,9 +699,12 @@ public:
 
         // Calculate theta = exp(parms[kz])
         double theta = exp(parms(kz));
+        
+        // Update theta cache
+        update_theta_cache(theta);
 
-        // Vectorized log probability of zero
-        arma::vec loglik0 = theta * log(theta) - theta * log(theta + mu);
+        // Vectorized log probability of zero using cached log(theta)
+        arma::vec loglik0 = theta * cached_log_theta - theta * log(theta + mu);
 
         // Initialize gradient for beta parameters
         arma::vec grad_beta = arma::zeros<arma::vec>(kz);
@@ -622,7 +714,7 @@ public:
         {
             arma::vec mu_0 = mu.elem(Y0);
             arma::vec term1 = -mu_0 * theta / (mu_0 + theta);
-            grad_beta += X.rows(Y0).t() * (weights.elem(Y0) % term1);
+            grad_beta += X_Y0.t() * (weights_Y0 % term1);
         }
 
         // For Y>0 observations
@@ -631,8 +723,8 @@ public:
             arma::vec mu_1 = mu.elem(Y1);
             arma::vec loglik0_1 = loglik0.elem(Y1);
             arma::vec logratio = loglik0_1 - log(1.0 - exp(loglik0_1));
-            arma::vec term2 = exp(logratio + log(theta) - log(mu_1 + theta) + eta.elem(Y1));
-            grad_beta += X.rows(Y1).t() * (weights.elem(Y1) % term2);
+            arma::vec term2 = exp(logratio + cached_log_theta - log(mu_1 + theta) + eta.elem(Y1));
+            grad_beta += X_Y1.t() * (weights_Y1 % term2);
         }
 
         // Vectorized gradient for log(theta)
@@ -643,8 +735,8 @@ public:
         {
             arma::vec mu_0 = mu.elem(Y0);
             arma::vec mu_theta_0 = mu_0 + theta;
-            arma::vec term_theta_0 = log(theta) - log(mu_theta_0) + 1.0 - theta / mu_theta_0;
-            grad_logtheta += sum(weights.elem(Y0) % term_theta_0);
+            arma::vec term_theta_0 = cached_log_theta - log(mu_theta_0) + 1.0 - theta / mu_theta_0;
+            grad_logtheta += sum(weights_Y0 % term_theta_0);
         }
 
         // For Y>0 observations
@@ -654,8 +746,8 @@ public:
             arma::vec mu_theta_1 = mu_1 + theta;
             arma::vec loglik0_1 = loglik0.elem(Y1);
             arma::vec logratio = loglik0_1 - log(1.0 - exp(loglik0_1));
-            arma::vec term_theta_1 = exp(logratio) % (log(theta) - log(mu_theta_1) + 1.0 - theta / mu_theta_1);
-            grad_logtheta -= sum(weights.elem(Y1) % term_theta_1);
+            arma::vec term_theta_1 = exp(logratio) % (cached_log_theta - log(mu_theta_1) + 1.0 - theta / mu_theta_1);
+            grad_logtheta -= sum(weights_Y1 % term_theta_1);
         }
 
         grad_logtheta *= theta;
