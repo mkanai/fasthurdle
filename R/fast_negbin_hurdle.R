@@ -34,7 +34,7 @@
 #' }
 #'
 #' @export
-fast_negbin_hurdle <- function(X, y, method = "BFGS", maxit = 10000, separate = TRUE) {
+fast_negbin_hurdle <- function(X, y, method = "BFGS", maxit = 10000, separate = TRUE, use_caching = TRUE) {
   # Fixed parameters
   dist <- "negbin"
   zero.dist <- "binomial"
@@ -82,7 +82,7 @@ fast_negbin_hurdle <- function(X, y, method = "BFGS", maxit = 10000, separate = 
     fit_count <- optim_count_negbin_cpp(
       start = c(start$count, log(start$theta["count"])),
       Y = y, X = X, offsetx = offsetx, weights = weights,
-      method = method, hessian = TRUE
+      method = method, hessian = TRUE, use_caching = use_caching
     )
 
     # Estimate zero component
@@ -90,7 +90,7 @@ fast_negbin_hurdle <- function(X, y, method = "BFGS", maxit = 10000, separate = 
       start = c(start$zero),
       Y = y, X = X, offsetx = offsetz, weights = weights,
       link = linkstr,
-      method = method, hessian = TRUE
+      method = method, hessian = TRUE, use_caching = use_caching
     )
 
     # Convert to compatible format
@@ -161,7 +161,7 @@ fast_negbin_hurdle <- function(X, y, method = "BFGS", maxit = 10000, separate = 
       Y = y, X = X, offsetx = offsetx, Z = X, offsetz = offsetz, weights = weights,
       dist = dist, zero_dist = zero.dist,
       link = linkstr,
-      method = method, hessian = TRUE
+      method = method, hessian = TRUE, use_caching = use_caching
     )
 
     # Convert to compatible format

@@ -12,8 +12,8 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
 // optim_count_poisson_cpp
-Rcpp::List optim_count_poisson_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights, const std::string& method, bool hessian);
-RcppExport SEXP _fasthurdle_optim_count_poisson_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP methodSEXP, SEXP hessianSEXP) {
+Rcpp::List optim_count_poisson_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights, const std::string& method, bool hessian, bool use_caching);
+RcppExport SEXP _fasthurdle_optim_count_poisson_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP methodSEXP, SEXP hessianSEXP, SEXP use_cachingSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -24,13 +24,14 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const arma::vec& >::type weights(weightsSEXP);
     Rcpp::traits::input_parameter< const std::string& >::type method(methodSEXP);
     Rcpp::traits::input_parameter< bool >::type hessian(hessianSEXP);
-    rcpp_result_gen = Rcpp::wrap(optim_count_poisson_cpp(start, Y, X, offsetx, weights, method, hessian));
+    Rcpp::traits::input_parameter< bool >::type use_caching(use_cachingSEXP);
+    rcpp_result_gen = Rcpp::wrap(optim_count_poisson_cpp(start, Y, X, offsetx, weights, method, hessian, use_caching));
     return rcpp_result_gen;
 END_RCPP
 }
 // optim_count_negbin_cpp
-Rcpp::List optim_count_negbin_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights, const std::string& method, bool hessian);
-RcppExport SEXP _fasthurdle_optim_count_negbin_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP methodSEXP, SEXP hessianSEXP) {
+Rcpp::List optim_count_negbin_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights, const std::string& method, bool hessian, bool use_caching);
+RcppExport SEXP _fasthurdle_optim_count_negbin_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP methodSEXP, SEXP hessianSEXP, SEXP use_cachingSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -41,13 +42,14 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const arma::vec& >::type weights(weightsSEXP);
     Rcpp::traits::input_parameter< const std::string& >::type method(methodSEXP);
     Rcpp::traits::input_parameter< bool >::type hessian(hessianSEXP);
-    rcpp_result_gen = Rcpp::wrap(optim_count_negbin_cpp(start, Y, X, offsetx, weights, method, hessian));
+    Rcpp::traits::input_parameter< bool >::type use_caching(use_cachingSEXP);
+    rcpp_result_gen = Rcpp::wrap(optim_count_negbin_cpp(start, Y, X, offsetx, weights, method, hessian, use_caching));
     return rcpp_result_gen;
 END_RCPP
 }
 // optim_count_geom_cpp
-Rcpp::List optim_count_geom_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights, const std::string& method, bool hessian);
-RcppExport SEXP _fasthurdle_optim_count_geom_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP methodSEXP, SEXP hessianSEXP) {
+Rcpp::List optim_count_geom_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights, const std::string& method, bool hessian, bool use_caching);
+RcppExport SEXP _fasthurdle_optim_count_geom_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP methodSEXP, SEXP hessianSEXP, SEXP use_cachingSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -58,13 +60,14 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const arma::vec& >::type weights(weightsSEXP);
     Rcpp::traits::input_parameter< const std::string& >::type method(methodSEXP);
     Rcpp::traits::input_parameter< bool >::type hessian(hessianSEXP);
-    rcpp_result_gen = Rcpp::wrap(optim_count_geom_cpp(start, Y, X, offsetx, weights, method, hessian));
+    Rcpp::traits::input_parameter< bool >::type use_caching(use_cachingSEXP);
+    rcpp_result_gen = Rcpp::wrap(optim_count_geom_cpp(start, Y, X, offsetx, weights, method, hessian, use_caching));
     return rcpp_result_gen;
 END_RCPP
 }
 // optim_zero_poisson_cpp
-Rcpp::List optim_zero_poisson_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights, const std::string& method, bool hessian);
-RcppExport SEXP _fasthurdle_optim_zero_poisson_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP methodSEXP, SEXP hessianSEXP) {
+Rcpp::List optim_zero_poisson_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights, const std::string& method, bool hessian, bool use_caching);
+RcppExport SEXP _fasthurdle_optim_zero_poisson_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP methodSEXP, SEXP hessianSEXP, SEXP use_cachingSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -75,13 +78,14 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const arma::vec& >::type weights(weightsSEXP);
     Rcpp::traits::input_parameter< const std::string& >::type method(methodSEXP);
     Rcpp::traits::input_parameter< bool >::type hessian(hessianSEXP);
-    rcpp_result_gen = Rcpp::wrap(optim_zero_poisson_cpp(start, Y, X, offsetx, weights, method, hessian));
+    Rcpp::traits::input_parameter< bool >::type use_caching(use_cachingSEXP);
+    rcpp_result_gen = Rcpp::wrap(optim_zero_poisson_cpp(start, Y, X, offsetx, weights, method, hessian, use_caching));
     return rcpp_result_gen;
 END_RCPP
 }
 // optim_zero_negbin_cpp
-Rcpp::List optim_zero_negbin_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights, const std::string& method, bool hessian);
-RcppExport SEXP _fasthurdle_optim_zero_negbin_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP methodSEXP, SEXP hessianSEXP) {
+Rcpp::List optim_zero_negbin_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights, const std::string& method, bool hessian, bool use_caching);
+RcppExport SEXP _fasthurdle_optim_zero_negbin_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP methodSEXP, SEXP hessianSEXP, SEXP use_cachingSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -92,13 +96,14 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const arma::vec& >::type weights(weightsSEXP);
     Rcpp::traits::input_parameter< const std::string& >::type method(methodSEXP);
     Rcpp::traits::input_parameter< bool >::type hessian(hessianSEXP);
-    rcpp_result_gen = Rcpp::wrap(optim_zero_negbin_cpp(start, Y, X, offsetx, weights, method, hessian));
+    Rcpp::traits::input_parameter< bool >::type use_caching(use_cachingSEXP);
+    rcpp_result_gen = Rcpp::wrap(optim_zero_negbin_cpp(start, Y, X, offsetx, weights, method, hessian, use_caching));
     return rcpp_result_gen;
 END_RCPP
 }
 // optim_zero_geom_cpp
-Rcpp::List optim_zero_geom_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights, const std::string& method, bool hessian);
-RcppExport SEXP _fasthurdle_optim_zero_geom_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP methodSEXP, SEXP hessianSEXP) {
+Rcpp::List optim_zero_geom_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights, const std::string& method, bool hessian, bool use_caching);
+RcppExport SEXP _fasthurdle_optim_zero_geom_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP methodSEXP, SEXP hessianSEXP, SEXP use_cachingSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -109,13 +114,14 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const arma::vec& >::type weights(weightsSEXP);
     Rcpp::traits::input_parameter< const std::string& >::type method(methodSEXP);
     Rcpp::traits::input_parameter< bool >::type hessian(hessianSEXP);
-    rcpp_result_gen = Rcpp::wrap(optim_zero_geom_cpp(start, Y, X, offsetx, weights, method, hessian));
+    Rcpp::traits::input_parameter< bool >::type use_caching(use_cachingSEXP);
+    rcpp_result_gen = Rcpp::wrap(optim_zero_geom_cpp(start, Y, X, offsetx, weights, method, hessian, use_caching));
     return rcpp_result_gen;
 END_RCPP
 }
 // optim_zero_binom_cpp
-Rcpp::List optim_zero_binom_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights, const std::string& link, const std::string& method, bool hessian);
-RcppExport SEXP _fasthurdle_optim_zero_binom_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP linkSEXP, SEXP methodSEXP, SEXP hessianSEXP) {
+Rcpp::List optim_zero_binom_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights, const std::string& link, const std::string& method, bool hessian, bool use_caching);
+RcppExport SEXP _fasthurdle_optim_zero_binom_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP linkSEXP, SEXP methodSEXP, SEXP hessianSEXP, SEXP use_cachingSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -127,13 +133,14 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const std::string& >::type link(linkSEXP);
     Rcpp::traits::input_parameter< const std::string& >::type method(methodSEXP);
     Rcpp::traits::input_parameter< bool >::type hessian(hessianSEXP);
-    rcpp_result_gen = Rcpp::wrap(optim_zero_binom_cpp(start, Y, X, offsetx, weights, link, method, hessian));
+    Rcpp::traits::input_parameter< bool >::type use_caching(use_cachingSEXP);
+    rcpp_result_gen = Rcpp::wrap(optim_zero_binom_cpp(start, Y, X, offsetx, weights, link, method, hessian, use_caching));
     return rcpp_result_gen;
 END_RCPP
 }
 // optim_joint_cpp
-Rcpp::List optim_joint_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::mat& Z, const arma::vec& offsetz, const arma::vec& weights, const std::string& dist, const std::string& zero_dist, const std::string& link, const std::string& method, bool hessian);
-RcppExport SEXP _fasthurdle_optim_joint_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP ZSEXP, SEXP offsetzSEXP, SEXP weightsSEXP, SEXP distSEXP, SEXP zero_distSEXP, SEXP linkSEXP, SEXP methodSEXP, SEXP hessianSEXP) {
+Rcpp::List optim_joint_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::mat& Z, const arma::vec& offsetz, const arma::vec& weights, const std::string& dist, const std::string& zero_dist, const std::string& link, const std::string& method, bool hessian, bool use_caching);
+RcppExport SEXP _fasthurdle_optim_joint_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP ZSEXP, SEXP offsetzSEXP, SEXP weightsSEXP, SEXP distSEXP, SEXP zero_distSEXP, SEXP linkSEXP, SEXP methodSEXP, SEXP hessianSEXP, SEXP use_cachingSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -149,20 +156,21 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const std::string& >::type link(linkSEXP);
     Rcpp::traits::input_parameter< const std::string& >::type method(methodSEXP);
     Rcpp::traits::input_parameter< bool >::type hessian(hessianSEXP);
-    rcpp_result_gen = Rcpp::wrap(optim_joint_cpp(start, Y, X, offsetx, Z, offsetz, weights, dist, zero_dist, link, method, hessian));
+    Rcpp::traits::input_parameter< bool >::type use_caching(use_cachingSEXP);
+    rcpp_result_gen = Rcpp::wrap(optim_joint_cpp(start, Y, X, offsetx, Z, offsetz, weights, dist, zero_dist, link, method, hessian, use_caching));
     return rcpp_result_gen;
 END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_fasthurdle_optim_count_poisson_cpp", (DL_FUNC) &_fasthurdle_optim_count_poisson_cpp, 7},
-    {"_fasthurdle_optim_count_negbin_cpp", (DL_FUNC) &_fasthurdle_optim_count_negbin_cpp, 7},
-    {"_fasthurdle_optim_count_geom_cpp", (DL_FUNC) &_fasthurdle_optim_count_geom_cpp, 7},
-    {"_fasthurdle_optim_zero_poisson_cpp", (DL_FUNC) &_fasthurdle_optim_zero_poisson_cpp, 7},
-    {"_fasthurdle_optim_zero_negbin_cpp", (DL_FUNC) &_fasthurdle_optim_zero_negbin_cpp, 7},
-    {"_fasthurdle_optim_zero_geom_cpp", (DL_FUNC) &_fasthurdle_optim_zero_geom_cpp, 7},
-    {"_fasthurdle_optim_zero_binom_cpp", (DL_FUNC) &_fasthurdle_optim_zero_binom_cpp, 8},
-    {"_fasthurdle_optim_joint_cpp", (DL_FUNC) &_fasthurdle_optim_joint_cpp, 12},
+    {"_fasthurdle_optim_count_poisson_cpp", (DL_FUNC) &_fasthurdle_optim_count_poisson_cpp, 8},
+    {"_fasthurdle_optim_count_negbin_cpp", (DL_FUNC) &_fasthurdle_optim_count_negbin_cpp, 8},
+    {"_fasthurdle_optim_count_geom_cpp", (DL_FUNC) &_fasthurdle_optim_count_geom_cpp, 8},
+    {"_fasthurdle_optim_zero_poisson_cpp", (DL_FUNC) &_fasthurdle_optim_zero_poisson_cpp, 8},
+    {"_fasthurdle_optim_zero_negbin_cpp", (DL_FUNC) &_fasthurdle_optim_zero_negbin_cpp, 8},
+    {"_fasthurdle_optim_zero_geom_cpp", (DL_FUNC) &_fasthurdle_optim_zero_geom_cpp, 8},
+    {"_fasthurdle_optim_zero_binom_cpp", (DL_FUNC) &_fasthurdle_optim_zero_binom_cpp, 9},
+    {"_fasthurdle_optim_joint_cpp", (DL_FUNC) &_fasthurdle_optim_joint_cpp, 13},
     {NULL, NULL, 0}
 };
 

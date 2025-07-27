@@ -170,10 +170,26 @@ protected:
     mutable arma::vec weights_Y0;
     mutable arma::vec offset_Y1;
     mutable arma::vec offset_Y0;
+    
+    // Runtime configuration for selective caching
+    bool use_caching;
+    bool is_negbin_model;
+    size_t n_observations;
+    
+    // Determine if caching should be used
+    bool should_use_cache() const {
+        // Enable caching for:
+        // 1. Negative binomial models (complex calculations)
+        // 2. Large datasets where cache hit rate is high
+        // 3. When explicitly enabled by user
+        return use_caching && (is_negbin_model || n_observations > 10000);
+    }
 
 public:
-    LikelihoodFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w)
-        : Y(y), X(x), offset(offs), weights(w), cache_initialized(false)
+    LikelihoodFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w,
+                      bool enable_caching = true, bool is_negbin = false)
+        : Y(y), X(x), offset(offs), weights(w), cache_initialized(false),
+          use_caching(enable_caching), is_negbin_model(is_negbin), n_observations(y.n_elem)
     {
         // Pre-compute indicator vectors
         Y0 = find(Y <= 0);
@@ -206,6 +222,12 @@ public:
     // Cached version of calculate_mu that avoids recalculation
     arma::vec calculate_mu_cached(const arma::vec &beta) const
     {
+        if (!should_use_cache())
+        {
+            // Direct calculation for simple models
+            return exp(X * beta + offset);
+        }
+        
         if (!cache_initialized)
         {
             // First time - full calculation
@@ -255,6 +277,10 @@ public:
     // Cached special functions
     double cached_lgamma(double x) const
     {
+        if (!should_use_cache()) {
+            return lgamma(x);
+        }
+        
         auto it = lgamma_cache.find(x);
         if (it != lgamma_cache.end()) {
             return it->second;
@@ -266,6 +292,10 @@ public:
     
     double cached_digamma(double x) const
     {
+        if (!should_use_cache()) {
+            return R::digamma(x);
+        }
+        
         auto it = digamma_cache.find(x);
         if (it != digamma_cache.end()) {
             return it->second;
@@ -283,8 +313,8 @@ public:
 class CountPoissonFunctor : public LikelihoodFunctor
 {
 public:
-    CountPoissonFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w)
-        : LikelihoodFunctor(y, x, offs, w) {}
+    CountPoissonFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w, bool enable_caching = true)
+        : LikelihoodFunctor(y, x, offs, w, enable_caching, false) {} // Simple model - is_negbin = false
 
     double operator()(const arma::vec &parms) override
     {
@@ -335,7 +365,12 @@ public:
         arma::vec mu = mu_full.elem(Y1);
 
         // Calculate eta for Y>0 observations
-        arma::vec eta = cached_Xbeta.elem(Y1) + offset_Y1;
+        arma::vec eta;
+        if (should_use_cache() && cache_initialized) {
+            eta = cached_Xbeta.elem(Y1) + offset_Y1;
+        } else {
+            eta = X_Y1 * parms + offset_Y1;
+        }
 
         // Get Y values for positive observations
         arma::vec Y_pos = Y.elem(Y1);
@@ -365,6 +400,15 @@ protected:
     
     void update_theta_cache(double theta) const
     {
+        if (!should_use_cache()) {
+            // Direct calculation without caching
+            cached_theta = theta;
+            cached_log_theta = log(theta);
+            cached_lgamma_theta = lgamma(theta);
+            cached_digamma_theta = R::digamma(theta);
+            return;
+        }
+        
         if (!theta_cache_initialized || std::abs(theta - cached_theta) > 1e-10) {
             cached_theta = theta;
             cached_log_theta = log(theta);
@@ -382,7 +426,7 @@ protected:
     
 public:
     NegBinLikelihoodFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w)
-        : LikelihoodFunctor(y, x, offs, w), theta_cache_initialized(false) {}
+        : LikelihoodFunctor(y, x, offs, w, true, true), theta_cache_initialized(false) {} // Complex model - caching enabled
 };
 
 // Count model Negative Binomial functor
@@ -457,7 +501,12 @@ public:
         arma::vec mu = mu_full.elem(Y1);
 
         // Calculate eta for Y>0 observations
-        arma::vec eta = cached_Xbeta.elem(Y1) + offset_Y1;
+        arma::vec eta;
+        if (should_use_cache() && cache_initialized) {
+            eta = cached_Xbeta.elem(Y1) + offset_Y1;
+        } else {
+            eta = X_Y1 * parms.subvec(0, kx - 1) + offset_Y1;
+        }
 
         // Calculate theta = exp(parms[kx])
         double theta = exp(parms(kx));
@@ -516,8 +565,8 @@ public:
 class CountGeomFunctor : public LikelihoodFunctor
 {
 public:
-    CountGeomFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w)
-        : LikelihoodFunctor(y, x, offs, w) {}
+    CountGeomFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w, bool enable_caching = true)
+        : LikelihoodFunctor(y, x, offs, w, enable_caching, false) {} // Simple model - is_negbin = false
 
     double operator()(const arma::vec &parms) override
     {
@@ -545,7 +594,12 @@ public:
         arma::vec mu = mu_full.elem(Y1);
 
         // Calculate eta for Y>0 observations
-        arma::vec eta = cached_Xbeta.elem(Y1) + offset_Y1;
+        arma::vec eta;
+        if (should_use_cache() && cache_initialized) {
+            eta = cached_Xbeta.elem(Y1) + offset_Y1;
+        } else {
+            eta = X_Y1 * parms + offset_Y1;
+        }
 
         // Get Y values for positive observations
         arma::vec Y_pos = Y.elem(Y1);
@@ -576,8 +630,8 @@ public:
 class ZeroPoissonFunctor : public LikelihoodFunctor
 {
 public:
-    ZeroPoissonFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w)
-        : LikelihoodFunctor(y, x, offs, w) {}
+    ZeroPoissonFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w, bool enable_caching = true)
+        : LikelihoodFunctor(y, x, offs, w, enable_caching, false) {} // Simple model - is_negbin = false
 
     double operator()(const arma::vec &parms) override
     {
@@ -613,7 +667,12 @@ public:
         arma::vec mu = calculate_mu_cached(parms);
 
         // Get eta from cache
-        arma::vec eta = cached_Xbeta + offset;
+        arma::vec eta;
+        if (should_use_cache() && cache_initialized) {
+            eta = cached_Xbeta + offset;
+        } else {
+            eta = X * parms + offset;
+        }
 
         // Initialize gradient term
         arma::vec grad_term = arma::zeros<arma::vec>(X.n_rows);
@@ -695,7 +754,12 @@ public:
         arma::vec mu = calculate_mu_cached(parms.subvec(0, kz - 1));
 
         // Get eta from cache
-        arma::vec eta = cached_Xbeta + offset;
+        arma::vec eta;
+        if (should_use_cache() && cache_initialized) {
+            eta = cached_Xbeta + offset;
+        } else {
+            eta = X * parms.subvec(0, kz - 1) + offset;
+        }
 
         // Calculate theta = exp(parms[kz])
         double theta = exp(parms(kz));
@@ -770,8 +834,8 @@ private:
     std::shared_ptr<ZeroNegBinFunctor> negbin_functor;
 
 public:
-    ZeroGeomFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w)
-        : LikelihoodFunctor(y, x, offs, w),
+    ZeroGeomFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w, bool enable_caching = true)
+        : LikelihoodFunctor(y, x, offs, w, enable_caching, false),  // Simple model - is_negbin = false
           negbin_functor(std::make_shared<ZeroNegBinFunctor>(y, x, offs, w)) {}
 
     double operator()(const arma::vec &parms) override
@@ -813,6 +877,13 @@ private:
     // Override cached mu calculation for non-exp link functions
     arma::vec calculate_mu_cached_binom(const arma::vec &beta) const
     {
+        if (!should_use_cache())
+        {
+            // Direct calculation for simple models
+            arma::vec eta = X * beta + offset;
+            return linkinv_func(eta);
+        }
+        
         if (!cache_initialized)
         {
             // First time - full calculation
@@ -855,8 +926,8 @@ private:
 
 public:
     ZeroBinomFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w,
-                     const std::string &link = "logit")
-        : LikelihoodFunctor(y, x, offs, w), link_name(link)
+                     const std::string &link = "logit", bool enable_caching = true)
+        : LikelihoodFunctor(y, x, offs, w, enable_caching, false), link_name(link)  // Simple model - is_negbin = false
     {
         linkinv_func = links::get_linkinv(link);
         mu_eta_func = links::get_mu_eta(link);
@@ -894,7 +965,12 @@ public:
         arma::vec mu = calculate_mu_cached_binom(parms);
 
         // Get eta from cache
-        arma::vec eta = cached_Xbeta + offset;
+        arma::vec eta;
+        if (should_use_cache() && cache_initialized) {
+            eta = cached_Xbeta + offset;
+        } else {
+            eta = X * parms + offset;
+        }
 
         // Calculate mu_eta (derivative of mu with respect to eta)
         arma::vec mu_eta_vec = mu_eta_func(eta);
@@ -1020,10 +1096,11 @@ Rcpp::List optim_count_poisson_cpp(
     const arma::vec &offsetx,
     const arma::vec &weights,
     const std::string &method = "BFGS",
-    bool hessian = true)
+    bool hessian = true,
+    bool use_caching = true)
 {
-    // Create functor
-    CountPoissonFunctor functor(Y, X, offsetx, weights);
+    // Create functor with caching option
+    CountPoissonFunctor functor(Y, X, offsetx, weights, use_caching);
 
     // Run optimization
     arma::vec par = start;
@@ -1038,10 +1115,12 @@ Rcpp::List optim_count_negbin_cpp(
     const arma::vec &offsetx,
     const arma::vec &weights,
     const std::string &method = "BFGS",
-    bool hessian = true)
+    bool hessian = true,
+    bool use_caching = true)
 {
-    // Create functor
+    // Create functor with caching option
     CountNegBinFunctor functor(Y, X, offsetx, weights);
+    // Note: CountNegBinFunctor always uses caching as it's a complex model
 
     // Run optimization
     arma::vec par = start;
@@ -1056,10 +1135,11 @@ Rcpp::List optim_count_geom_cpp(
     const arma::vec &offsetx,
     const arma::vec &weights,
     const std::string &method = "BFGS",
-    bool hessian = true)
+    bool hessian = true,
+    bool use_caching = true)
 {
-    // Create functor
-    CountGeomFunctor functor(Y, X, offsetx, weights);
+    // Create functor with caching option
+    CountGeomFunctor functor(Y, X, offsetx, weights, use_caching);
 
     // Run optimization
     arma::vec par = start;
@@ -1074,10 +1154,11 @@ Rcpp::List optim_zero_poisson_cpp(
     const arma::vec &offsetx,
     const arma::vec &weights,
     const std::string &method = "BFGS",
-    bool hessian = true)
+    bool hessian = true,
+    bool use_caching = true)
 {
-    // Create functor
-    ZeroPoissonFunctor functor(Y, X, offsetx, weights);
+    // Create functor with caching option
+    ZeroPoissonFunctor functor(Y, X, offsetx, weights, use_caching);
 
     // Run optimization
     arma::vec par = start;
@@ -1092,10 +1173,12 @@ Rcpp::List optim_zero_negbin_cpp(
     const arma::vec &offsetx,
     const arma::vec &weights,
     const std::string &method = "BFGS",
-    bool hessian = true)
+    bool hessian = true,
+    bool use_caching = true)
 {
-    // Create functor
+    // Create functor with caching option
     ZeroNegBinFunctor functor(Y, X, offsetx, weights);
+    // Note: ZeroNegBinFunctor always uses caching as it's a complex model
 
     // Run optimization
     arma::vec par = start;
@@ -1110,10 +1193,11 @@ Rcpp::List optim_zero_geom_cpp(
     const arma::vec &offsetx,
     const arma::vec &weights,
     const std::string &method = "BFGS",
-    bool hessian = true)
+    bool hessian = true,
+    bool use_caching = true)
 {
-    // Create functor
-    ZeroGeomFunctor functor(Y, X, offsetx, weights);
+    // Create functor with caching option
+    ZeroGeomFunctor functor(Y, X, offsetx, weights, use_caching);
 
     // Run optimization
     arma::vec par = start;
@@ -1129,10 +1213,11 @@ Rcpp::List optim_zero_binom_cpp(
     const arma::vec &weights,
     const std::string &link = "logit",
     const std::string &method = "BFGS",
-    bool hessian = true)
+    bool hessian = true,
+    bool use_caching = true)
 {
-    // Create functor with C++ link function
-    ZeroBinomFunctor functor(Y, X, offsetx, weights, link);
+    // Create functor with C++ link function and caching option
+    ZeroBinomFunctor functor(Y, X, offsetx, weights, link, use_caching);
 
     // Run optimization
     arma::vec par = start;
@@ -1152,7 +1237,8 @@ Rcpp::List optim_joint_cpp(
     const std::string &zero_dist = "binomial",
     const std::string &link = "logit",
     const std::string &method = "BFGS",
-    bool hessian = true)
+    bool hessian = true,
+    bool use_caching = true)
 {
     // Create count functor based on distribution
     std::shared_ptr<LikelihoodFunctor> count_functor;
@@ -1160,7 +1246,7 @@ Rcpp::List optim_joint_cpp(
 
     if (dist == "poisson")
     {
-        count_functor = std::make_shared<CountPoissonFunctor>(Y, X, offsetx, weights);
+        count_functor = std::make_shared<CountPoissonFunctor>(Y, X, offsetx, weights, use_caching);
     }
     else if (dist == "negbin")
     {
@@ -1169,7 +1255,7 @@ Rcpp::List optim_joint_cpp(
     }
     else if (dist == "geometric")
     {
-        count_functor = std::make_shared<CountGeomFunctor>(Y, X, offsetx, weights);
+        count_functor = std::make_shared<CountGeomFunctor>(Y, X, offsetx, weights, use_caching);
     }
     else
     {
@@ -1182,7 +1268,7 @@ Rcpp::List optim_joint_cpp(
 
     if (zero_dist == "poisson")
     {
-        zero_functor = std::make_shared<ZeroPoissonFunctor>(Y, Z, offsetz, weights);
+        zero_functor = std::make_shared<ZeroPoissonFunctor>(Y, Z, offsetz, weights, use_caching);
     }
     else if (zero_dist == "negbin")
     {
@@ -1191,11 +1277,11 @@ Rcpp::List optim_joint_cpp(
     }
     else if (zero_dist == "geometric")
     {
-        zero_functor = std::make_shared<ZeroGeomFunctor>(Y, Z, offsetz, weights);
+        zero_functor = std::make_shared<ZeroGeomFunctor>(Y, Z, offsetz, weights, use_caching);
     }
     else if (zero_dist == "binomial")
     {
-        zero_functor = std::make_shared<ZeroBinomFunctor>(Y, Z, offsetz, weights, link);
+        zero_functor = std::make_shared<ZeroBinomFunctor>(Y, Z, offsetz, weights, link, use_caching);
     }
     else
     {

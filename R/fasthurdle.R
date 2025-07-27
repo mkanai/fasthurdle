@@ -162,20 +162,21 @@ fasthurdle <- function(formula, data, subset, na.action, weights, offset,
   method <- control$method
   hessian <- control$hessian
   separate <- control$separate
-  control$method <- control$hessian <- control$separate <- control$start <- NULL
+  use_caching <- control$use_caching
+  control$method <- control$hessian <- control$separate <- control$start <- control$use_caching <- NULL
 
   # Perform model estimation
   if (separate) {
     fit_result <- estimate_separate_components(
       Y, X, Z, offsetx, offsetz, weights,
       dist, zero.dist, linkstr, start,
-      method, hessian, control, kx, kz
+      method, hessian, use_caching, control, kx, kz
     )
   } else {
     fit_result <- estimate_joint_components(
       Y, X, Z, offsetx, offsetz, weights,
       dist, zero.dist, linkstr, start,
-      method, hessian, control, kx, kz
+      method, hessian, use_caching, control, kx, kz
     )
   }
 
@@ -416,7 +417,7 @@ generate_starting_values <- function(start, Y, X, Z, offsetx, offsetz, weights,
 #' @keywords internal
 estimate_separate_components <- function(Y, X, Z, offsetx, offsetz, weights,
                                          dist, zero.dist, linkstr, start,
-                                         method, hessian, control, kx, kz) {
+                                         method, hessian, use_caching, control, kx, kz) {
   if (control$trace) cat("calling roptim for count component estimation:\n")
 
   # Estimate count component
@@ -424,17 +425,17 @@ estimate_separate_components <- function(Y, X, Z, offsetx, offsetz, weights,
     "poisson" = optim_count_poisson_cpp(
       start = c(start$count),
       Y = Y, X = X, offsetx = offsetx, weights = weights,
-      method = method, hessian = hessian
+      method = method, hessian = hessian, use_caching = use_caching
     ),
     "negbin" = optim_count_negbin_cpp(
       start = c(start$count, log(start$theta["count"])),
       Y = Y, X = X, offsetx = offsetx, weights = weights,
-      method = method, hessian = hessian
+      method = method, hessian = hessian, use_caching = use_caching
     ),
     "geometric" = optim_count_geom_cpp(
       start = c(start$count),
       Y = Y, X = X, offsetx = offsetx, weights = weights,
-      method = method, hessian = hessian
+      method = method, hessian = hessian, use_caching = use_caching
     )
   )
 
@@ -445,23 +446,23 @@ estimate_separate_components <- function(Y, X, Z, offsetx, offsetz, weights,
     "poisson" = optim_zero_poisson_cpp(
       start = c(start$zero),
       Y = Y, X = Z, offsetx = offsetz, weights = weights,
-      method = method, hessian = hessian
+      method = method, hessian = hessian, use_caching = use_caching
     ),
     "negbin" = optim_zero_negbin_cpp(
       start = c(start$zero, log(start$theta["zero"])),
       Y = Y, X = Z, offsetx = offsetz, weights = weights,
-      method = method, hessian = hessian
+      method = method, hessian = hessian, use_caching = use_caching
     ),
     "geometric" = optim_zero_geom_cpp(
       start = c(start$zero),
       Y = Y, X = Z, offsetx = offsetz, weights = weights,
-      method = method, hessian = hessian
+      method = method, hessian = hessian, use_caching = use_caching
     ),
     "binomial" = optim_zero_binom_cpp(
       start = c(start$zero),
       Y = Y, X = Z, offsetx = offsetz, weights = weights,
       link = linkstr,
-      method = method, hessian = hessian
+      method = method, hessian = hessian, use_caching = use_caching
     )
   )
 
@@ -564,7 +565,7 @@ estimate_separate_components <- function(Y, X, Z, offsetx, offsetz, weights,
 #' @keywords internal
 estimate_joint_components <- function(Y, X, Z, offsetx, offsetz, weights,
                                       dist, zero.dist, linkstr, start,
-                                      method, hessian, control, kx, kz) {
+                                      method, hessian, use_caching, control, kx, kz) {
   if (control$trace) cat("calling roptim for joint count and zero hurdle estimation:\n")
 
   # Estimate joint model
@@ -576,7 +577,7 @@ estimate_joint_components <- function(Y, X, Z, offsetx, offsetz, weights,
     Y = Y, X = X, offsetx = offsetx, Z = Z, offsetz = offsetz, weights = weights,
     dist = dist, zero_dist = zero.dist,
     link = linkstr,
-    method = method, hessian = hessian
+    method = method, hessian = hessian, use_caching = use_caching
   )
 
   # Convert to compatible format
@@ -709,8 +710,8 @@ calculate_fitted_values <- function(Y, X, Z, coefc, coefz, offsetx, offsetz,
 #' @return A list of control parameters.
 #'
 #' @export
-hurdle.control <- function(method = "BFGS", maxit = 10000, trace = FALSE, separate = TRUE, start = NULL, ...) {
-  rval <- list(method = method, maxit = maxit, trace = trace, separate = separate, start = start)
+hurdle.control <- function(method = "BFGS", maxit = 10000, trace = FALSE, separate = TRUE, start = NULL, use_caching = TRUE, ...) {
+  rval <- list(method = method, maxit = maxit, trace = trace, separate = separate, start = start, use_caching = use_caching)
   rval <- c(rval, list(...))
   if (!is.null(rval$fnscale)) warning("fnscale must not be modified")
   rval$fnscale <- -1
