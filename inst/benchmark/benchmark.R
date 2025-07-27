@@ -4,7 +4,7 @@ library(microbenchmark)
 library(ggplot2)
 
 # Function to run benchmarks for different sample sizes and model combinations
-run_benchmarks <- function(sample_sizes = 10**seq(3, 6), times = 10) {
+run_benchmarks <- function(sample_sizes = 10**seq(3, 5), times = 10) {
   results <- list()
 
   # Define all combinations of count and zero hurdle distributions

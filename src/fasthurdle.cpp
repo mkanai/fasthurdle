@@ -198,14 +198,18 @@ public:
         // Calculate log probability of zero: loglik0 = -mu
         arma::vec loglik0 = -mu;
 
-        // Calculate log probability of Y[Y1]: loglik1 = dpois(Y[Y1], lambda = mu, log = TRUE)
-        arma::vec loglik1(Y1.n_elem);
+        // Get Y values for positive observations
+        arma::vec Y_pos = Y.elem(Y1);
+
+        // Vectorized log probability of Y[Y1]: dpois(y, lambda, log) = y * log(lambda) - lambda - lgamma(y + 1)
+        // First compute lgamma for Y_pos + 1
+        arma::vec lgamma_y_1(Y1.n_elem);
         for (size_t i = 0; i < Y1.n_elem; i++)
         {
-            // dpois(y, lambda, log) = y * log(lambda) - lambda - lgamma(y + 1)
-            double y = Y(Y1(i));
-            loglik1(i) = y * log(mu(i)) - mu(i) - lgamma(y + 1);
+            lgamma_y_1(i) = lgamma(Y_pos(i) + 1.0);
         }
+
+        arma::vec loglik1 = Y_pos % log(mu) - mu - lgamma_y_1;
 
         // Calculate log-likelihood
         double loglik = sum(weights.elem(Y1) % loglik1) - sum(weights.elem(Y1) % log(1.0 - exp(loglik0)));
@@ -229,17 +233,14 @@ public:
         // Calculate mu = exp(eta)
         arma::vec mu = calculate_mu(eta);
 
-        // Calculate the gradient term
-        arma::vec grad_term = Y.elem(Y1) - mu;
+        // Get Y values for positive observations
+        arma::vec Y_pos = Y.elem(Y1);
 
-        // Calculate the second term
+        // Vectorized gradient calculation
         arma::vec loglik0 = -mu; // log probability of zero
-        arma::vec second_term = exp(loglik0 - log(1.0 - exp(loglik0)) + eta);
+        arma::vec grad_term = Y_pos - mu - exp(loglik0 - log(1.0 - exp(loglik0)) + eta);
 
-        // Combine terms
-        grad_term = grad_term - second_term;
-
-        // Calculate the gradient
+        // Single matrix multiplication instead of loop
         grad = X.rows(Y1).t() * (weights.elem(Y1) % grad_term);
 
         // Return negative gradient for minimization
@@ -271,19 +272,25 @@ public:
         // Calculate theta = exp(parms[kx])
         double theta = exp(parms(kx));
 
-        // Calculate log probabilities
-        arma::vec loglik0(Y1.n_elem);
-        arma::vec loglik1(Y1.n_elem);
+        // Get Y values for positive observations
+        arma::vec Y_pos = Y.elem(Y1);
 
+        // Vectorized log probability of zero
+        arma::vec loglik0 = theta * log(theta) - theta * log(theta + mu);
+
+        // Vectorized log probability of Y[Y1]
+        // First compute lgamma for vectors
+        arma::vec lgamma_y_theta(Y1.n_elem);
+        arma::vec lgamma_y_1(Y1.n_elem);
         for (size_t i = 0; i < Y1.n_elem; i++)
         {
-            // Log probability of zero
-            loglik0(i) = dnbinom_log(0, theta, mu(i));
-
-            // Log probability of Y[Y1]
-            double y = Y(Y1(i));
-            loglik1(i) = dnbinom_log(y, theta, mu(i));
+            lgamma_y_theta(i) = lgamma(Y_pos(i) + theta);
+            lgamma_y_1(i) = lgamma(Y_pos(i) + 1.0);
         }
+
+        // Vectorized negative binomial log probability
+        arma::vec loglik1 = lgamma_y_theta - lgamma(theta) - lgamma_y_1 +
+                            Y_pos % log(mu) - (Y_pos + theta) % log(mu + theta);
 
         // Calculate log-likelihood
         double loglik = sum(weights.elem(Y1) % loglik1) - sum(weights.elem(Y1) % log(1.0 - exp(loglik0)));
@@ -313,44 +320,44 @@ public:
         // Calculate theta = exp(parms[kx])
         double theta = exp(parms(kx));
 
-        // Calculate log probability of zero
-        arma::vec loglik0(Y1.n_elem);
-        for (size_t i = 0; i < Y1.n_elem; i++)
-        {
-            loglik0(i) = dnbinom_log(0, theta, mu(i));
-        }
+        // Vectorized calculation of log probability of zero
+        arma::vec loglik0 = theta * log(theta) - theta * log(theta + mu);
 
         // Calculate logratio = log(p0/(1-p0))
         arma::vec logratio = loglik0 - log(1.0 - exp(loglik0));
 
-        // Calculate the first term for beta parameters
-        arma::vec term1 = Y.elem(Y1) - (mu % (Y.elem(Y1) + theta)) / (mu + theta);
+        // Get Y values for positive observations
+        arma::vec Y_pos = Y.elem(Y1);
 
-        // Calculate the second term for beta parameters
-        arma::vec term2 = exp(logratio + log(theta) - log(mu + theta) + eta);
+        // Vectorized gradient calculation for beta parameters
+        arma::vec grad_term = Y_pos - mu % (Y_pos + theta) / (mu + theta) -
+                              exp(logratio + log(theta) - log(mu + theta) + eta);
 
-        // Calculate the gradient term for beta parameters
-        arma::vec grad_term = term1 - term2;
-
-        // Calculate the gradient for beta parameters
+        // Single matrix multiplication instead of loop
         arma::vec grad_beta = X.rows(Y1).t() * (weights.elem(Y1) % grad_term);
 
-        // Calculate the gradient for log(theta)
-        double grad_logtheta = 0.0;
+        // Vectorized gradient calculation for log(theta)
+        arma::vec mu_plus_theta = mu + theta;
+        arma::vec log_mu_plus_theta = log(mu_plus_theta);
+
+        // Vectorized digamma for Y_pos + theta
+        arma::vec digamma_y_theta(Y1.n_elem);
         for (size_t i = 0; i < Y1.n_elem; i++)
         {
-            double y = Y(Y1(i));
-            double mui = mu(i);
-
-            // digamma(y + theta) - digamma(theta) + log(theta) - log(mui + theta) + 1 - (y + theta) / (mui + theta)
-            double term3 = R::digamma(y + theta) - R::digamma(theta) + log(theta) - log(mui + theta) + 1.0 - (y + theta) / (mui + theta);
-
-            // exp(logratio) * (log(theta) - log(mui + theta) + 1 - theta / (mui + theta))
-            double term4 = exp(logratio(i)) * (log(theta) - log(mui + theta) + 1.0 - theta / (mui + theta));
-
-            grad_logtheta += weights(Y1(i)) * (term3 + term4);
+            digamma_y_theta(i) = R::digamma(Y_pos(i) + theta);
         }
-        grad_logtheta *= theta;
+
+        double digamma_theta = R::digamma(theta);
+
+        // Vectorized first term for grad_logtheta
+        arma::vec term3 = digamma_y_theta - digamma_theta + log(theta) - log_mu_plus_theta +
+                          1.0 - (Y_pos + theta) / mu_plus_theta;
+
+        // Vectorized second term for grad_logtheta
+        arma::vec term4 = exp(logratio) % (log(theta) - log_mu_plus_theta + 1.0 - theta / mu_plus_theta);
+
+        // Sum with weights
+        double grad_logtheta = theta * sum(weights.elem(Y1) % (term3 + term4));
 
         // Combine gradients
         grad = arma::zeros<arma::vec>(parms.n_elem);
@@ -383,9 +390,6 @@ public:
 
     void Gradient(const arma::vec &parms, arma::vec &grad) override
     {
-        // Create indicator vector for Y>0
-        arma::uvec Y1 = find(Y > 0);
-
         // If no Y>0 observations, return zero gradient
         if (Y1.n_elem == 0)
         {
@@ -399,28 +403,24 @@ public:
         // Calculate mu = exp(eta)
         arma::vec mu = exp(eta);
 
-        // Calculate the first term: Y[Y1] - mu * (Y[Y1] + 1) / (mu + 1)
-        arma::vec term1(Y1.n_elem);
-        for (size_t i = 0; i < Y1.n_elem; i++)
-        {
-            double y = Y(Y1(i));
-            term1(i) = y - mu(i) * (y + 1.0) / (mu(i) + 1.0);
-        }
+        // Get Y values for positive observations
+        arma::vec Y_pos = Y.elem(Y1);
 
-        // Calculate the second term using negative binomial with size=1 (geometric)
-        arma::vec loglik0(Y1.n_elem);
-        for (size_t i = 0; i < Y1.n_elem; i++)
-        {
-            loglik0(i) = dnbinom_log(0, 1.0, mu(i));
-        }
+        // Vectorized calculation of the first term: Y[Y1] - mu * (Y[Y1] + 1) / (mu + 1)
+        arma::vec mu_plus_one = mu + 1.0;
+        arma::vec term1 = Y_pos - mu % (Y_pos + 1.0) / mu_plus_one;
 
+        // Vectorized calculation of log probability of zero for geometric (theta=1)
+        arma::vec loglik0 = log(1.0) - log(mu_plus_one); // Simplified: log(1/(mu+1))
+
+        // Vectorized second term
         arma::vec logratio = loglik0 - log(1.0 - exp(loglik0));
-        arma::vec term2 = exp(logratio - log(mu + 1.0) + eta);
+        arma::vec term2 = exp(logratio - log(mu_plus_one) + eta);
 
-        // Calculate the gradient term
+        // Vectorized gradient calculation
         arma::vec grad_term = term1 - term2;
 
-        // Calculate the gradient
+        // Single matrix multiplication
         grad = X.rows(Y1).t() * (weights.elem(Y1) % grad_term);
 
         // Return negative gradient for minimization
@@ -481,15 +481,17 @@ public:
             grad_term.elem(Y0) = -mu.elem(Y0);
         }
 
-        // For Y>0 observations: exp(ppois(0, lambda = mu, log.p = TRUE) - ppois(0, lambda = mu, lower.tail = FALSE, log.p = TRUE) + eta)
+        // For Y>0 observations: vectorized calculation
         if (Y1.n_elem > 0)
         {
-            arma::vec loglik0 = -mu.elem(Y1);
+            arma::vec mu_1 = mu.elem(Y1);
+            arma::vec eta_1 = eta.elem(Y1);
+            arma::vec loglik0 = -mu_1;
             arma::vec logratio = loglik0 - log(1.0 - exp(loglik0));
-            grad_term.elem(Y1) = exp(logratio + eta.elem(Y1));
+            grad_term.elem(Y1) = exp(logratio + eta_1);
         }
 
-        // Calculate the gradient
+        // Calculate the gradient with single matrix multiplication
         grad = X.t() * (weights % grad_term);
 
         // Return negative gradient for minimization
@@ -518,12 +520,8 @@ public:
         // Calculate log-likelihood
         double loglik = 0.0;
 
-        // Calculate log probability of zero: loglik0 = dnbinom(0, size = theta, mu = mu, log = TRUE)
-        arma::vec loglik0(mu.n_elem);
-        for (size_t i = 0; i < mu.n_elem; i++)
-        {
-            loglik0(i) = dnbinom_log(0, theta, mu(i));
-        }
+        // Vectorized log probability of zero
+        arma::vec loglik0 = theta * log(theta) - theta * log(theta + mu);
 
         // For Y=0 observations: sum(weights[Y0] * loglik0[Y0])
         if (Y0.n_elem > 0)
@@ -556,12 +554,8 @@ public:
         // Calculate theta = exp(parms[kz])
         double theta = exp(parms(kz));
 
-        // Calculate log probability of zero: loglik0 = dnbinom(0, size = theta, mu = mu, log = TRUE)
-        arma::vec loglik0(mu.n_elem);
-        for (size_t i = 0; i < mu.n_elem; i++)
-        {
-            loglik0(i) = dnbinom_log(0, theta, mu(i));
-        }
+        // Vectorized log probability of zero
+        arma::vec loglik0 = theta * log(theta) - theta * log(theta + mu);
 
         // Initialize gradient for beta parameters
         arma::vec grad_beta = arma::zeros<arma::vec>(kz);
@@ -569,40 +563,42 @@ public:
         // For Y=0 observations: -mu * theta / (mu + theta)
         if (Y0.n_elem > 0)
         {
-            arma::vec term1 = -mu.elem(Y0) * theta / (mu.elem(Y0) + theta);
+            arma::vec mu_0 = mu.elem(Y0);
+            arma::vec term1 = -mu_0 * theta / (mu_0 + theta);
             grad_beta += X.rows(Y0).t() * (weights.elem(Y0) % term1);
         }
 
         // For Y>0 observations
         if (Y1.n_elem > 0)
         {
-            arma::vec logratio = loglik0.elem(Y1) - log(1.0 - exp(loglik0.elem(Y1)));
-            arma::vec term2 = exp(logratio + log(theta) - log(mu.elem(Y1) + theta) + eta.elem(Y1));
+            arma::vec mu_1 = mu.elem(Y1);
+            arma::vec loglik0_1 = loglik0.elem(Y1);
+            arma::vec logratio = loglik0_1 - log(1.0 - exp(loglik0_1));
+            arma::vec term2 = exp(logratio + log(theta) - log(mu_1 + theta) + eta.elem(Y1));
             grad_beta += X.rows(Y1).t() * (weights.elem(Y1) % term2);
         }
 
-        // Calculate the gradient for log(theta)
+        // Vectorized gradient for log(theta)
         double grad_logtheta = 0.0;
 
         // For Y=0 observations
         if (Y0.n_elem > 0)
         {
-            for (size_t i = 0; i < Y0.n_elem; i++)
-            {
-                double mui = mu(Y0(i));
-                grad_logtheta += weights(Y0(i)) * (log(theta) - log(mui + theta) + 1.0 - theta / (mui + theta));
-            }
+            arma::vec mu_0 = mu.elem(Y0);
+            arma::vec mu_theta_0 = mu_0 + theta;
+            arma::vec term_theta_0 = log(theta) - log(mu_theta_0) + 1.0 - theta / mu_theta_0;
+            grad_logtheta += sum(weights.elem(Y0) % term_theta_0);
         }
 
         // For Y>0 observations
         if (Y1.n_elem > 0)
         {
-            for (size_t i = 0; i < Y1.n_elem; i++)
-            {
-                double mui = mu(Y1(i));
-                double logratio_i = loglik0(Y1(i)) - log(1.0 - exp(loglik0(Y1(i))));
-                grad_logtheta -= weights(Y1(i)) * exp(logratio_i) * (log(theta) - log(mui + theta) + 1.0 - theta / (mui + theta));
-            }
+            arma::vec mu_1 = mu.elem(Y1);
+            arma::vec mu_theta_1 = mu_1 + theta;
+            arma::vec loglik0_1 = loglik0.elem(Y1);
+            arma::vec logratio = loglik0_1 - log(1.0 - exp(loglik0_1));
+            arma::vec term_theta_1 = exp(logratio) % (log(theta) - log(mu_theta_1) + 1.0 - theta / mu_theta_1);
+            grad_logtheta -= sum(weights.elem(Y1) % term_theta_1);
         }
 
         grad_logtheta *= theta;

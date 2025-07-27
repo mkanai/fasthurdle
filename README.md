@@ -40,21 +40,21 @@ summary(model)
 Average speedup of `fasthurdle` compared to `pscl::hurdle`:
 
 | Count Model | Zero Hurdle | Speedup Factor |
-| ----------- | ----------- | -------------- |
-| geometric   | binomial    | 1.8x           |
-| geometric   | geometric   | 1.9x           |
-| geometric   | negbin      | 2.8x           |
-| geometric   | poisson     | 2.6x           |
-| negbin      | binomial    | 3.6x           |
-| negbin      | geometric   | 3.5x           |
-| negbin      | negbin      | 3.5x           |
-| negbin      | poisson     | 3.8x           |
-| poisson     | binomial    | 2.8x           |
-| poisson     | geometric   | 2.6x           |
-| poisson     | negbin      | 3.2x           |
-| poisson     | poisson     | 3.4x           |
+|------------|------------|---------------|
+| geometric  | binomial   | 2.2x          |
+| geometric  | geometric  | 2.3x          |
+| geometric  | negbin     | 5.1x          |
+| geometric  | poisson    | 2.9x          |
+| negbin     | binomial   | 13x           |
+| negbin     | geometric  | 12.1x         |
+| negbin     | negbin     | 11x           |
+| negbin     | poisson    | 11.3x         |
+| poisson    | binomial   | 3.4x          |
+| poisson    | geometric  | 3.1x          |
+| poisson    | negbin     | 5.8x          |
+| poisson    | poisson    | 3.7x          |
 
-_Note: Benchmarks run with sample sizes 1,000, 10,000, 100,000, and 1,000,000. Speedup factor is the ratio of pscl execution time to fasthurdle execution time._
+*Note: Benchmarks run with sample sizes 1000, 10000, 1e+05. Speedup factor is the ratio of pscl execution time to fasthurdle execution time.*
 
 ## Features
 
@@ -74,4 +74,4 @@ GPL-2
 
 ## Contact
 
-Masahiro Kanai (mkanai@broadinstitute.org)
+Masahiro Kanai (<mkanai@broadinstitute.org>)
