@@ -35,7 +35,7 @@ model <- fasthurdle(y ~ x | z, data = df, dist = "poisson", zero.dist = "binomia
 summary(model)
 ```
 
-**Note:** `fasthurdle` uses OpenMP multithreading for improved performance. Control the number of threads using the `OMP_NUM_THREADS` environment variable. When testing many peak-gene pairs sequentially, avoid additional parallelization (e.g., with `parallel` or `future`) to prevent oversubscription.
+**Note:** `fasthurdle` uses OpenMP multithreading for improved performance. Control the number of threads using the `OMP_NUM_THREADS` environment variable. When fitting many models, avoid additional parallelization (e.g., with `parallel` or `future`) to prevent oversubscription.
 
 ## Peak-gene link analysis
 
