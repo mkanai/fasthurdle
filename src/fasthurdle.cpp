@@ -749,17 +749,19 @@ private:
     std::shared_ptr<LikelihoodFunctor> count_functor;
     std::shared_ptr<LikelihoodFunctor> zero_functor;
     int kx;
-    int kz;
     bool dist_negbin;
-    bool zero_dist_negbin;
 
 public:
     JointFunctor(std::shared_ptr<LikelihoodFunctor> count, std::shared_ptr<LikelihoodFunctor> zero,
                  int count_params, int zero_params,
                  bool count_is_negbin, bool zero_is_negbin)
         : count_functor(count), zero_functor(zero),
-          kx(count_params), kz(zero_params),
-          dist_negbin(count_is_negbin), zero_dist_negbin(zero_is_negbin) {}
+          kx(count_params),
+          dist_negbin(count_is_negbin) {
+        // Suppress unused parameter warnings
+        (void)zero_params;
+        (void)zero_is_negbin;
+    }
 
     double operator()(const arma::vec &parms) override
     {
