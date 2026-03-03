@@ -4,11 +4,42 @@ A fast implementation of hurdle models using Rcpp. This package provides the sam
 
 ## Installation
 
-You can install the development version of fasthurdle from GitHub with:
+### Pre-built binaries from R-universe (recommended)
+
+Pre-built binaries are available from [R-universe](https://mkanai.r-universe.dev/fasthurdle), which does not require a C++ compiler or Fortran toolchain:
+
+```r
+install.packages("fasthurdle", repos = c("https://mkanai.r-universe.dev", "https://cloud.r-project.org"))
+```
+
+### From source
+
+Installing from source requires a C++ compiler and GNU Fortran (`gfortran`, required by the RcppArmadillo dependency):
 
 ```r
 # install.packages("pak")
 pak::pkg_install("mkanai/fasthurdle")
+```
+
+### Docker / Singularity
+
+For environments where installing compiler toolchains is difficult, a pre-built Docker image is available:
+
+```bash
+docker run --rm -it masakanai/fasthurdle
+```
+
+On HPC clusters that support [Singularity](https://docs.sylabs.io/guides/latest/user-guide/) / [Apptainer](https://apptainer.org/), you can convert the Docker image:
+
+```bash
+singularity build fasthurdle.sif docker://masakanai/fasthurdle
+singularity exec fasthurdle.sif R
+```
+
+To build the image locally, a Dockerfile is provided under [`docker/`](docker/):
+
+```bash
+docker build -t masakanai/fasthurdle docker/
 ```
 
 ## General usage
