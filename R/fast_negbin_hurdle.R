@@ -7,6 +7,8 @@
 #'
 #' @param X Model matrix for both count and zero components
 #' @param y Response vector of counts
+#' @param offsetx Optional offset vector for the count model. Default is NULL (no offset).
+#' @param offsetz Optional offset vector for the zero model. Default is NULL (no offset).
 #' @param method Optimization method used by optim. Default is "BFGS".
 #' @param maxit Maximum number of iterations. Default is 10000.
 #' @param separate Logical. If TRUE, count and zero components are estimated separately. Default is TRUE.
@@ -34,7 +36,7 @@
 #' }
 #'
 #' @export
-fast_negbin_hurdle <- function(X, y, method = "BFGS", maxit = 10000, separate = TRUE) {
+fast_negbin_hurdle <- function(X, y, offsetx = NULL, offsetz = NULL, method = "BFGS", maxit = 10000, separate = TRUE) {
   # Fixed parameters
   dist <- "negbin"
   zero.dist <- "binomial"
@@ -49,10 +51,10 @@ fast_negbin_hurdle <- function(X, y, method = "BFGS", maxit = 10000, separate = 
   kx <- NCOL(X)
   kz <- NCOL(X) # Using same matrix for both components
 
-  # Set up weights and offsets (default to 1 and 0)
+  # Set up weights and offsets
   weights <- rep.int(1, n)
-  offsetx <- rep.int(0, n)
-  offsetz <- rep.int(0, n)
+  if (is.null(offsetx)) offsetx <- rep.int(0, n)
+  if (is.null(offsetz)) offsetz <- rep.int(0, n)
 
   # Generate starting values
   # For count model
@@ -244,8 +246,8 @@ fast_negbin_hurdle <- function(X, y, method = "BFGS", maxit = 10000, separate = 
     start = start,
     weights = NULL,
     offset = list(
-      count = NULL,
-      zero = NULL
+      count = if (all(offsetx == 0)) NULL else offsetx,
+      zero = if (all(offsetz == 0)) NULL else offsetz
     ),
     n = nobs,
     df.null = nobs - 2,
