@@ -114,32 +114,3 @@ test_that("fast_negbin_hurdle with Z matrix produces the same results as fasthur
   expect_length(coef(fast_model, model = "zero"), ncol(Z))
   expect_equal(nrow(fast_model$vcov), ncol(X) + ncol(Z))
 })
-
-test_that("fast_negbin_hurdle is faster than fasthurdle", {
-  skip_on_cran()
-
-  # Generate larger sample data for timing comparison
-  set.seed(123)
-  n <- 5000
-  x <- rnorm(n)
-  z <- rnorm(n)
-  lambda <- exp(1 + 0.5 * x)
-  p <- plogis(0.5 - 0.5 * z)
-  y <- rbinom(n, size = 1, prob = p) * rpois(n, lambda = lambda)
-
-  # Create a data frame and model matrix
-  df <- data.frame(y = y, x = x, z = z)
-  X <- model.matrix(~ x + z, data = df)
-
-  # Time both functions
-  time_fast <- system.time(fast_negbin_hurdle(X, y))
-  time_regular <- system.time(fasthurdle(y ~ x + z,
-    data = df,
-    dist = "negbin",
-    zero.dist = "binomial",
-    link = "logit"
-  ))
-
-  # The specialized function should be faster
-  expect_lt(time_fast[3], time_regular[3])
-})

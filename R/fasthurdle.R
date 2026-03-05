@@ -1138,7 +1138,7 @@ residuals.fasthurdle <- function(object, type = c("pearson", "response"), ...) {
 #'
 #' @return A matrix of predicted probabilities.
 #'
-#' @export
+#' @export predprob.fasthurdle
 predprob.fasthurdle <- function(obj, ...) {
   predict(obj, type = "prob", ...)
 }

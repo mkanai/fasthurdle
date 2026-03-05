@@ -1,8 +1,8 @@
 Package: fasthurdle
 Type: Package
 Title: Fast Implementation of Hurdle Models
-Version: 1.0
-Date: 2025-04-12
+Version: 1.1
+Date: 2026-03-05
 Author: Masahiro Kanai
 Maintainer: Masahiro Kanai <mkanai@broadinstitute.org>
 Description: A fast implementation of hurdle models using Rcpp. This package
