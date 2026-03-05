@@ -133,11 +133,24 @@ namespace links
     }
 }
 
-// Helper function for negative binomial log probability
-inline double dnbinom_log(double y, double size, double mu)
+// Numerically stable log(1 - exp(x)) for x < 0
+// Uses log1p(-exp(x)) when exp(x) is close to 1 (i.e., x close to 0)
+// and log(-expm1(x)) when x is very negative
+inline arma::vec log1mexp(const arma::vec &x)
 {
-    return lgamma(y + size) - lgamma(size) - lgamma(y + 1) +
-           size * log(size) + y * log(mu) - (y + size) * log(size + mu);
+    arma::vec result(x.n_elem);
+    for (size_t i = 0; i < x.n_elem; i++)
+    {
+        if (x(i) > -M_LN2)
+        {
+            result(i) = std::log(-std::expm1(x(i)));
+        }
+        else
+        {
+            result(i) = std::log1p(-std::exp(x(i)));
+        }
+    }
+    return result;
 }
 
 // Base class for all likelihood functors
@@ -212,7 +225,7 @@ public:
         arma::vec loglik1 = Y_pos % log(mu) - mu - lgamma_y_1;
 
         // Calculate log-likelihood
-        double loglik = sum(weights.elem(Y1) % loglik1) - sum(weights.elem(Y1) % log(1.0 - exp(loglik0)));
+        double loglik = sum(weights.elem(Y1) % loglik1) - sum(weights.elem(Y1) % log1mexp(loglik0));
 
         // Return negative log-likelihood for minimization
         return -loglik;
@@ -238,7 +251,7 @@ public:
 
         // Vectorized gradient calculation
         arma::vec loglik0 = -mu; // log probability of zero
-        arma::vec grad_term = Y_pos - mu - exp(loglik0 - log(1.0 - exp(loglik0)) + eta);
+        arma::vec grad_term = Y_pos - mu - exp(loglik0 - log1mexp(loglik0) + eta);
 
         // Single matrix multiplication instead of loop
         grad = X.rows(Y1).t() * (weights.elem(Y1) % grad_term);
@@ -293,7 +306,7 @@ public:
                             Y_pos % log(mu) + theta * log(theta) - (Y_pos + theta) % log(mu + theta);
 
         // Calculate log-likelihood
-        double loglik = sum(weights.elem(Y1) % loglik1) - sum(weights.elem(Y1) % log(1.0 - exp(loglik0)));
+        double loglik = sum(weights.elem(Y1) % loglik1) - sum(weights.elem(Y1) % log1mexp(loglik0));
 
         // Return negative log-likelihood for minimization
         return -loglik;
@@ -324,7 +337,7 @@ public:
         arma::vec loglik0 = theta * log(theta) - theta * log(theta + mu);
 
         // Calculate logratio = log(p0/(1-p0))
-        arma::vec logratio = loglik0 - log(1.0 - exp(loglik0));
+        arma::vec logratio = loglik0 - log1mexp(loglik0);
 
         // Get Y values for positive observations
         arma::vec Y_pos = Y.elem(Y1);
@@ -372,9 +385,14 @@ public:
 // Count model Geometric functor (special case of Negative Binomial with theta = 1)
 class CountGeomFunctor : public LikelihoodFunctor
 {
+private:
+    // Use a shared_ptr to manage the CountNegBinFunctor instance
+    std::shared_ptr<CountNegBinFunctor> negbin_functor;
+
 public:
     CountGeomFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w)
-        : LikelihoodFunctor(y, x, offs, w) {}
+        : LikelihoodFunctor(y, x, offs, w),
+          negbin_functor(std::make_shared<CountNegBinFunctor>(y, x, offs, w)) {}
 
     double operator()(const arma::vec &parms) override
     {
@@ -383,9 +401,8 @@ public:
         parms_extended.subvec(0, parms.n_elem - 1) = parms;
         parms_extended(parms.n_elem) = 0.0; // log(1) = 0
 
-        // Create a CountNegBinFunctor and call it with the extended parameter vector
-        CountNegBinFunctor functor(Y, X, offset, weights);
-        return functor(parms_extended);
+        // Use the shared CountNegBinFunctor instance
+        return (*negbin_functor)(parms_extended);
     }
 
     void Gradient(const arma::vec &parms, arma::vec &grad) override
@@ -414,7 +431,7 @@ public:
         arma::vec loglik0 = log(1.0) - log(mu_plus_one); // Simplified: log(1/(mu+1))
 
         // Vectorized second term
-        arma::vec logratio = loglik0 - log(1.0 - exp(loglik0));
+        arma::vec logratio = loglik0 - log1mexp(loglik0);
         arma::vec term2 = exp(logratio - log(mu_plus_one) + eta);
 
         // Vectorized gradient calculation
@@ -456,7 +473,7 @@ public:
         // For Y>0 observations: sum(weights[Y1] * log(1 - exp(loglik0[Y1])))
         if (Y1.n_elem > 0)
         {
-            arma::vec temp = log(1.0 - exp(loglik0.elem(Y1)));
+            arma::vec temp = log1mexp(loglik0.elem(Y1));
             loglik += sum(weights.elem(Y1) % temp);
         }
 
@@ -487,7 +504,7 @@ public:
             arma::vec mu_1 = mu.elem(Y1);
             arma::vec eta_1 = eta.elem(Y1);
             arma::vec loglik0 = -mu_1;
-            arma::vec logratio = loglik0 - log(1.0 - exp(loglik0));
+            arma::vec logratio = loglik0 - log1mexp(loglik0);
             grad_term.elem(Y1) = exp(logratio + eta_1);
         }
 
@@ -532,7 +549,7 @@ public:
         // For Y>0 observations: sum(weights[Y1] * log(1 - exp(loglik0[Y1])))
         if (Y1.n_elem > 0)
         {
-            arma::vec temp = log(1.0 - exp(loglik0.elem(Y1)));
+            arma::vec temp = log1mexp(loglik0.elem(Y1));
             loglik += sum(weights.elem(Y1) % temp);
         }
 
@@ -573,7 +590,7 @@ public:
         {
             arma::vec mu_1 = mu.elem(Y1);
             arma::vec loglik0_1 = loglik0.elem(Y1);
-            arma::vec logratio = loglik0_1 - log(1.0 - exp(loglik0_1));
+            arma::vec logratio = loglik0_1 - log1mexp(loglik0_1);
             arma::vec term2 = exp(logratio + log(theta) - log(mu_1 + theta) + eta.elem(Y1));
             grad_beta += X.rows(Y1).t() * (weights.elem(Y1) % term2);
         }
@@ -596,7 +613,7 @@ public:
             arma::vec mu_1 = mu.elem(Y1);
             arma::vec mu_theta_1 = mu_1 + theta;
             arma::vec loglik0_1 = loglik0.elem(Y1);
-            arma::vec logratio = loglik0_1 - log(1.0 - exp(loglik0_1));
+            arma::vec logratio = loglik0_1 - log1mexp(loglik0_1);
             arma::vec term_theta_1 = exp(logratio) % (log(theta) - log(mu_theta_1) + 1.0 - theta / mu_theta_1);
             grad_logtheta -= sum(weights.elem(Y1) % term_theta_1);
         }
