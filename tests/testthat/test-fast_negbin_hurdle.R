@@ -16,7 +16,7 @@ test_that("fast_negbin_hurdle produces the same results as fasthurdle with negbi
   X <- model.matrix(~ x + z, data = df)
 
   # Fit models with both functions
-  fast_model <- fast_negbin_hurdle(X, y)
+  fast_model <- fast_negbin_hurdle(X, y, compute_fitted = TRUE)
   regular_model <- fasthurdle(y ~ x + z,
     data = df,
     dist = "negbin",
@@ -69,7 +69,7 @@ test_that("fast_negbin_hurdle with Z matrix produces the same results as fasthur
   # Fit fast_negbin_hurdle with separate Z and offsetx
   X <- model.matrix(~x, data = df)
   Z <- model.matrix(~ x + log_depth, data = df)
-  fast_model <- fast_negbin_hurdle(X, y, Z = Z, offsetx = log_depth)
+  fast_model <- fast_negbin_hurdle(X, y, Z = Z, offsetx = log_depth, compute_fitted = TRUE)
 
   # Fit fasthurdle with equivalent formula specification
   regular_model <- fasthurdle(y ~ x + offset(log_depth) | x + log_depth,
@@ -113,4 +113,32 @@ test_that("fast_negbin_hurdle with Z matrix produces the same results as fasthur
   expect_length(coef(fast_model, model = "count"), ncol(X))
   expect_length(coef(fast_model, model = "zero"), ncol(Z))
   expect_equal(nrow(fast_model$vcov), ncol(X) + ncol(Z))
+})
+
+test_that("fast_negbin_hurdle with compute_fitted = FALSE skips fitted values but summary/AIC/BIC work", {
+  set.seed(1)
+  n <- 200
+  x <- rnorm(n)
+  lambda <- exp(1 + 0.5 * x)
+  p <- plogis(0.5 - 0.3 * x)
+  y <- rbinom(n, size = 1, prob = p) * rpois(n, lambda = lambda)
+  X <- cbind(1, x)
+  colnames(X) <- c("(Intercept)", "x")
+
+  m <- fast_negbin_hurdle(X, y) # compute_fitted = FALSE by default
+
+  # Fitted values and related slots should be NULL
+  expect_null(m$fitted.values)
+  expect_null(m$residuals)
+  expect_null(m$y)
+  expect_null(m$x)
+
+  # summary, AIC, BIC, coef should all work
+  s <- expect_no_error(summary(m))
+  expect_no_error(print(s))
+  expect_no_error(AIC(m))
+  expect_no_error(BIC(m))
+  expect_length(coef(m, model = "count"), 2)
+  expect_length(coef(m, model = "zero"), 2)
+  expect_true(m$converged)
 })

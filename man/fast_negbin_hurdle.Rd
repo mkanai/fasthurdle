@@ -12,7 +12,8 @@ fast_negbin_hurdle(
   offsetz = NULL,
   method = "BFGS",
   maxit = 10000,
-  separate = TRUE
+  separate = TRUE,
+  compute_fitted = FALSE
 )
 }
 \arguments{
@@ -31,6 +32,10 @@ fast_negbin_hurdle(
 \item{maxit}{Maximum number of iterations. Default is 10000.}
 
 \item{separate}{Logical. If TRUE, count and zero components are estimated separately. Default is TRUE.}
+
+\item{compute_fitted}{Logical. If FALSE (default), skip computing fitted values
+and residuals for speed. Set to TRUE if you need fitted.values, residuals, y, or x
+in the returned object.}
 }
 \value{
 An object of class "fasthurdle" representing the fitted model.

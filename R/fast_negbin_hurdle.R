@@ -13,6 +13,9 @@
 #' @param method Optimization method used by optim. Default is "BFGS".
 #' @param maxit Maximum number of iterations. Default is 10000.
 #' @param separate Logical. If TRUE, count and zero components are estimated separately. Default is TRUE.
+#' @param compute_fitted Logical. If FALSE (default), skip computing fitted values
+#'   and residuals for speed. Set to TRUE if you need fitted.values, residuals, y, or x
+#'   in the returned object.
 #'
 #' @return An object of class "fasthurdle" representing the fitted model.
 #'
@@ -37,15 +40,14 @@
 #' }
 #'
 #' @export
-fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, method = "BFGS", maxit = 10000, separate = TRUE) {
+fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, method = "BFGS", maxit = 10000, separate = TRUE, compute_fitted = FALSE) {
   # Fixed parameters
   dist <- "negbin"
   zero.dist <- "binomial"
   linkstr <- "logit"
 
-  # Create link function
-  linkobj <- make.link(linkstr)
-  linkinv <- linkobj$linkinv
+  # Link function (hardcoded logit)
+  linkinv <- plogis
 
   # Set up model dimensions
   n <- length(y)
@@ -198,12 +200,17 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, m
   )
 
   # Calculate fitted values and residuals in C++
-  fitted_result <- compute_negbin_hurdle_fitted_cpp(
-    coefc, coefz, X, Z, offsetx, offsetz, theta["count"], y
-  )
-  Yhat <- fitted_result$fitted.values
-  names(Yhat) <- rownames(X)
-  res <- fitted_result$residuals
+  if (compute_fitted) {
+    fitted_result <- compute_negbin_hurdle_fitted_cpp(
+      coefc, coefz, X, Z, offsetx, offsetz, theta["count"], y
+    )
+    Yhat <- fitted_result$fitted.values
+    names(Yhat) <- rownames(X)
+    res <- fitted_result$residuals
+  } else {
+    Yhat <- NULL
+    res <- NULL
+  }
 
   # Calculate effective observations
   nobs <- sum(weights > 0)
@@ -235,8 +242,8 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, m
     separate = separate,
     converged = converged,
     call = match.call(),
-    y = y,
-    x = list(count = X, zero = Z)
+    y = if (compute_fitted) y else NULL,
+    x = if (compute_fitted) list(count = X, zero = Z) else NULL
   )
 
   class(rval) <- "fasthurdle"

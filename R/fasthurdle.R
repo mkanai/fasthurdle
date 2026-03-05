@@ -846,7 +846,9 @@ print.fasthurdle <- function(x, digits = max(3, getOption("digits") - 3), ...) {
 #' @export
 summary.fasthurdle <- function(object, ...) {
   ## residuals
-  object$residuals <- residuals(object, type = "pearson")
+  if (!is.null(object$fitted.values)) {
+    object$residuals <- residuals(object, type = "pearson")
+  }
 
   ## compute z statistics
   kc <- length(object$coefficients$count)
@@ -905,10 +907,12 @@ print.summary.fasthurdle <- function(x, digits = max(3, getOption("digits") - 3)
   if (!x$converged) {
     cat("model did not converge\n")
   } else {
-    cat("Pearson residuals:\n")
-    print(structure(quantile(x$residuals),
-      names = c("Min", "1Q", "Median", "3Q", "Max")
-    ), digits = digits, ...)
+    if (!is.null(x$residuals)) {
+      cat("Pearson residuals:\n")
+      print(structure(quantile(x$residuals),
+        names = c("Min", "1Q", "Median", "3Q", "Max")
+      ), digits = digits, ...)
+    }
 
     cat(paste("\nCount model coefficients (truncated ", x$dist$count, " with log link):\n", sep = ""))
     printCoefmat(x$coefficients$count, digits = digits, signif.legend = FALSE)
