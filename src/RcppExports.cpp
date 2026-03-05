@@ -169,6 +169,24 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// compute_negbin_hurdle_fitted_cpp
+Rcpp::List compute_negbin_hurdle_fitted_cpp(const arma::vec& coefc, const arma::vec& coefz, const arma::mat& X, const arma::mat& Z, const arma::vec& offsetx, const arma::vec& offsetz, double theta, const arma::vec& y);
+RcppExport SEXP _fasthurdle_compute_negbin_hurdle_fitted_cpp(SEXP coefcSEXP, SEXP coefzSEXP, SEXP XSEXP, SEXP ZSEXP, SEXP offsetxSEXP, SEXP offsetzSEXP, SEXP thetaSEXP, SEXP ySEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::vec& >::type coefc(coefcSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type coefz(coefzSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type X(XSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type Z(ZSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type offsetx(offsetxSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type offsetz(offsetzSEXP);
+    Rcpp::traits::input_parameter< double >::type theta(thetaSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type y(ySEXP);
+    rcpp_result_gen = Rcpp::wrap(compute_negbin_hurdle_fitted_cpp(coefc, coefz, X, Z, offsetx, offsetz, theta, y));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_fasthurdle_optim_count_poisson_cpp", (DL_FUNC) &_fasthurdle_optim_count_poisson_cpp, 9},
@@ -179,6 +197,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fasthurdle_optim_zero_geom_cpp", (DL_FUNC) &_fasthurdle_optim_zero_geom_cpp, 9},
     {"_fasthurdle_optim_zero_binom_cpp", (DL_FUNC) &_fasthurdle_optim_zero_binom_cpp, 10},
     {"_fasthurdle_optim_joint_cpp", (DL_FUNC) &_fasthurdle_optim_joint_cpp, 14},
+    {"_fasthurdle_compute_negbin_hurdle_fitted_cpp", (DL_FUNC) &_fasthurdle_compute_negbin_hurdle_fitted_cpp, 8},
     {NULL, NULL, 0}
 };
 

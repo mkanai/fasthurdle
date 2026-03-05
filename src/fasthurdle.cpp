@@ -134,21 +134,29 @@ namespace links
 }
 
 // Numerically stable log(1 - exp(x)) for x < 0
-// Uses log1p(-exp(x)) when exp(x) is close to 1 (i.e., x close to 0)
-// and log(-expm1(x)) when x is very negative
+// Uses log(-expm1(x)) when x is close to 0 (x > -ln2)
+// and log1p(-exp(x)) when x is very negative (x <= -ln2)
 inline arma::vec log1mexp(const arma::vec &x)
 {
     arma::vec result(x.n_elem);
-    for (size_t i = 0; i < x.n_elem; i++)
+    // Split into two branches for vectorization
+    arma::uvec small = find(x > -M_LN2);  // close to 0: use expm1
+    arma::uvec large = find(x <= -M_LN2); // very negative: use exp
+
+    if (small.n_elem > 0)
     {
-        if (x(i) > -M_LN2)
+        // For each element in 'small', compute log(-expm1(x))
+        arma::vec xs = x.elem(small);
+        for (size_t i = 0; i < xs.n_elem; i++)
         {
-            result(i) = std::log(-std::expm1(x(i)));
+            xs(i) = std::log(-std::expm1(xs(i)));
         }
-        else
-        {
-            result(i) = std::log1p(-std::exp(x(i)));
-        }
+        result.elem(small) = xs;
+    }
+    if (large.n_elem > 0)
+    {
+        // Vectorized path: log1p(-exp(x)) for the common case
+        result.elem(large) = log1p(-exp(x.elem(large)));
     }
     return result;
 }
@@ -166,6 +174,15 @@ protected:
     arma::uvec Y0;
     arma::uvec Y1;
 
+    // Cached subsets (constant across all iterations)
+    arma::mat X_pos;       // X.rows(Y1)
+    arma::mat X_zero;      // X.rows(Y0)
+    arma::vec offset_pos;  // offset.elem(Y1)
+    arma::vec offset_zero; // offset.elem(Y0)
+    arma::vec w_pos;       // weights.elem(Y1)
+    arma::vec w_zero;      // weights.elem(Y0)
+    arma::vec Y_pos;       // Y.elem(Y1)
+
 public:
     LikelihoodFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w)
         : Y(y), X(x), offset(offs), weights(w)
@@ -173,6 +190,21 @@ public:
         // Pre-compute indicator vectors
         Y0 = find(Y <= 0);
         Y1 = find(Y > 0);
+
+        // Cache constant subsets to avoid repeated allocation
+        if (Y1.n_elem > 0)
+        {
+            X_pos = X.rows(Y1);
+            offset_pos = offset.elem(Y1);
+            w_pos = weights.elem(Y1);
+            Y_pos = Y.elem(Y1);
+        }
+        if (Y0.n_elem > 0)
+        {
+            X_zero = X.rows(Y0);
+            offset_zero = offset.elem(Y0);
+            w_zero = weights.elem(Y0);
+        }
     }
 
     // Common utility functions
@@ -193,9 +225,22 @@ public:
 // Count model Poisson functor
 class CountPoissonFunctor : public LikelihoodFunctor
 {
+private:
+    arma::vec lgamma_y_1_cached; // lgamma(Y_pos + 1), constant across iterations
+
 public:
     CountPoissonFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w)
-        : LikelihoodFunctor(y, x, offs, w) {}
+        : LikelihoodFunctor(y, x, offs, w)
+    {
+        if (Y1.n_elem > 0)
+        {
+            lgamma_y_1_cached.set_size(Y1.n_elem);
+            for (size_t i = 0; i < Y1.n_elem; i++)
+            {
+                lgamma_y_1_cached(i) = lgamma(Y_pos(i) + 1.0);
+            }
+        }
+    }
 
     double operator()(const arma::vec &parms) override
     {
@@ -206,26 +251,15 @@ public:
         }
 
         // Calculate mu = exp(X * parms + offset) for Y>0 observations
-        arma::vec mu = calculate_mu(X.rows(Y1) * parms + offset.elem(Y1));
+        arma::vec mu = calculate_mu(X_pos * parms + offset_pos);
 
         // Calculate log probability of zero: loglik0 = -mu
         arma::vec loglik0 = -mu;
 
-        // Get Y values for positive observations
-        arma::vec Y_pos = Y.elem(Y1);
-
-        // Vectorized log probability of Y[Y1]: dpois(y, lambda, log) = y * log(lambda) - lambda - lgamma(y + 1)
-        // First compute lgamma for Y_pos + 1
-        arma::vec lgamma_y_1(Y1.n_elem);
-        for (size_t i = 0; i < Y1.n_elem; i++)
-        {
-            lgamma_y_1(i) = lgamma(Y_pos(i) + 1.0);
-        }
-
-        arma::vec loglik1 = Y_pos % log(mu) - mu - lgamma_y_1;
+        arma::vec loglik1 = Y_pos % log(mu) - mu - lgamma_y_1_cached;
 
         // Calculate log-likelihood
-        double loglik = sum(weights.elem(Y1) % loglik1) - sum(weights.elem(Y1) % log1mexp(loglik0));
+        double loglik = arma::dot(w_pos, loglik1) - arma::dot(w_pos, log1mexp(loglik0));
 
         // Return negative log-likelihood for minimization
         return -loglik;
@@ -241,20 +275,17 @@ public:
         }
 
         // Calculate eta = X * parms + offset for Y>0 observations
-        arma::vec eta = X.rows(Y1) * parms + offset.elem(Y1);
+        arma::vec eta = X_pos * parms + offset_pos;
 
         // Calculate mu = exp(eta)
         arma::vec mu = calculate_mu(eta);
-
-        // Get Y values for positive observations
-        arma::vec Y_pos = Y.elem(Y1);
 
         // Vectorized gradient calculation
         arma::vec loglik0 = -mu; // log probability of zero
         arma::vec grad_term = Y_pos - mu - exp(loglik0 - log1mexp(loglik0) + eta);
 
         // Single matrix multiplication instead of loop
-        grad = X.rows(Y1).t() * (weights.elem(Y1) % grad_term);
+        grad = X_pos.t() * (w_pos % grad_term);
 
         // Return negative gradient for minimization
         grad = -grad;
@@ -264,49 +295,73 @@ public:
 // Count model Negative Binomial functor
 class CountNegBinFunctor : public LikelihoodFunctor
 {
+private:
+    arma::vec lgamma_y_1_cached; // lgamma(Y_pos + 1), constant across iterations
+
+    // Cached intermediates shared between operator() and Gradient().
+    // We store the parameter vector used to compute them and reuse
+    // the cache only when Gradient() is called with identical parameters.
+    arma::vec cached_parms;
+    arma::vec cached_eta;
+    arma::vec cached_mu;
+    double cached_theta;
+    arma::vec cached_loglik0;
+    arma::vec cached_logratio;
+    bool cache_valid;
+
+    void compute_intermediates(const arma::vec &parms)
+    {
+        int kx = X.n_cols;
+        cached_eta = X_pos * parms.subvec(0, kx - 1) + offset_pos;
+        cached_mu = exp(cached_eta);
+        cached_theta = exp(parms(kx));
+        double log_theta = log(cached_theta);
+        cached_loglik0 = cached_theta * log_theta - cached_theta * log(cached_theta + cached_mu);
+        cached_logratio = cached_loglik0 - log1mexp(cached_loglik0);
+        cached_parms = parms;
+        cache_valid = true;
+    }
+
 public:
     CountNegBinFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w)
-        : LikelihoodFunctor(y, x, offs, w) {}
+        : LikelihoodFunctor(y, x, offs, w), cached_theta(0.0), cache_valid(false)
+    {
+        // Cache lgamma(Y_pos + 1) since Y_pos never changes
+        if (Y1.n_elem > 0)
+        {
+            lgamma_y_1_cached.set_size(Y1.n_elem);
+            for (size_t i = 0; i < Y1.n_elem; i++)
+            {
+                lgamma_y_1_cached(i) = lgamma(Y_pos(i) + 1.0);
+            }
+        }
+    }
 
     double operator()(const arma::vec &parms) override
     {
-        // Get number of parameters
-        int kx = X.n_cols;
-
         // If no Y>0 observations, return 0
         if (Y1.n_elem == 0)
         {
             return 0.0;
         }
 
-        // Calculate mu = exp(X * parms[0:kx-1] + offset) for Y>0 observations
-        arma::vec mu = calculate_mu(X.rows(Y1) * parms.subvec(0, kx - 1) + offset.elem(Y1));
+        // Compute and cache intermediates
+        compute_intermediates(parms);
 
-        // Calculate theta = exp(parms[kx])
-        double theta = exp(parms(kx));
-
-        // Get Y values for positive observations
-        arma::vec Y_pos = Y.elem(Y1);
-
-        // Vectorized log probability of zero
-        arma::vec loglik0 = theta * log(theta) - theta * log(theta + mu);
-
-        // Vectorized log probability of Y[Y1]
-        // First compute lgamma for vectors
+        // lgamma(Y_pos + theta) depends on theta (changes each iteration)
         arma::vec lgamma_y_theta(Y1.n_elem);
-        arma::vec lgamma_y_1(Y1.n_elem);
         for (size_t i = 0; i < Y1.n_elem; i++)
         {
-            lgamma_y_theta(i) = lgamma(Y_pos(i) + theta);
-            lgamma_y_1(i) = lgamma(Y_pos(i) + 1.0);
+            lgamma_y_theta(i) = lgamma(Y_pos(i) + cached_theta);
         }
 
         // Vectorized negative binomial log probability
-        arma::vec loglik1 = lgamma_y_theta - lgamma(theta) - lgamma_y_1 +
-                            Y_pos % log(mu) + theta * log(theta) - (Y_pos + theta) % log(mu + theta);
+        arma::vec loglik1 = lgamma_y_theta - lgamma(cached_theta) - lgamma_y_1_cached +
+                            Y_pos % log(cached_mu) + cached_theta * log(cached_theta) -
+                            (Y_pos + cached_theta) % log(cached_mu + cached_theta);
 
         // Calculate log-likelihood
-        double loglik = sum(weights.elem(Y1) % loglik1) - sum(weights.elem(Y1) % log1mexp(loglik0));
+        double loglik = arma::dot(w_pos, loglik1) - arma::dot(w_pos, log1mexp(cached_loglik0));
 
         // Return negative log-likelihood for minimization
         return -loglik;
@@ -324,34 +379,28 @@ public:
             return;
         }
 
-        // Calculate eta = X * parms[0:kx-1] + offset for Y>0 observations
-        arma::vec eta = X.rows(Y1) * parms.subvec(0, kx - 1) + offset.elem(Y1);
+        // Reuse cached intermediates from operator() if parameters match
+        if (!cache_valid || parms.n_elem != cached_parms.n_elem ||
+            !arma::all(parms == cached_parms))
+        {
+            compute_intermediates(parms);
+        }
 
-        // Calculate mu = exp(eta)
-        arma::vec mu = calculate_mu(eta);
-
-        // Calculate theta = exp(parms[kx])
-        double theta = exp(parms(kx));
-
-        // Vectorized calculation of log probability of zero
-        arma::vec loglik0 = theta * log(theta) - theta * log(theta + mu);
-
-        // Calculate logratio = log(p0/(1-p0))
-        arma::vec logratio = loglik0 - log1mexp(loglik0);
-
-        // Get Y values for positive observations
-        arma::vec Y_pos = Y.elem(Y1);
+        // Use cached values
+        const arma::vec &eta = cached_eta;
+        const arma::vec &mu = cached_mu;
+        double theta = cached_theta;
+        const arma::vec &logratio = cached_logratio;
 
         // Vectorized gradient calculation for beta parameters
-        arma::vec grad_term = Y_pos - mu % (Y_pos + theta) / (mu + theta) -
-                              exp(logratio + log(theta) - log(mu + theta) + eta);
-
-        // Single matrix multiplication instead of loop
-        arma::vec grad_beta = X.rows(Y1).t() * (weights.elem(Y1) % grad_term);
-
-        // Vectorized gradient calculation for log(theta)
         arma::vec mu_plus_theta = mu + theta;
         arma::vec log_mu_plus_theta = log(mu_plus_theta);
+
+        arma::vec grad_term = Y_pos - mu % (Y_pos + theta) / mu_plus_theta -
+                              exp(logratio + log(theta) - log_mu_plus_theta + eta);
+
+        // Single matrix multiplication instead of loop
+        arma::vec grad_beta = X_pos.t() * (w_pos % grad_term);
 
         // Vectorized digamma for Y_pos + theta
         arma::vec digamma_y_theta(Y1.n_elem);
@@ -370,7 +419,7 @@ public:
         arma::vec term4 = exp(logratio) % (log(theta) - log_mu_plus_theta + 1.0 - theta / mu_plus_theta);
 
         // Sum with weights
-        double grad_logtheta = theta * sum(weights.elem(Y1) % (term3 + term4));
+        double grad_logtheta = theta * arma::dot(w_pos, term3 + term4);
 
         // Combine gradients
         grad = arma::zeros<arma::vec>(parms.n_elem);
@@ -444,14 +493,14 @@ public:
         // For Y=0 observations: sum(weights[Y0] * loglik0[Y0])
         if (Y0.n_elem > 0)
         {
-            loglik += sum(weights.elem(Y0) % loglik0.elem(Y0));
+            loglik += arma::dot(w_zero, loglik0.elem(Y0));
         }
 
         // For Y>0 observations: sum(weights[Y1] * log(1 - exp(loglik0[Y1])))
         if (Y1.n_elem > 0)
         {
             arma::vec temp = log1mexp(loglik0.elem(Y1));
-            loglik += sum(weights.elem(Y1) % temp);
+            loglik += arma::dot(w_pos, temp);
         }
 
         // Return negative log-likelihood for minimization
@@ -505,29 +554,29 @@ public:
         // Get number of parameters
         int kz = X.n_cols;
 
-        // Calculate mu = exp(X * parms[0:kz-1] + offset)
-        arma::vec mu = calculate_mu(X * parms.subvec(0, kz - 1) + offset);
-
-        // Calculate theta = exp(parms[kz])
+        // Calculate mu = exp(X * parms[0:kz-1] + offset) for all observations
+        arma::vec mu_zero, mu_pos;
         double theta = exp(parms(kz));
+        double log_theta = log(theta);
 
         // Calculate log-likelihood
         double loglik = 0.0;
 
-        // Vectorized log probability of zero
-        arma::vec loglik0 = theta * log(theta) - theta * log(theta + mu);
-
-        // For Y=0 observations: sum(weights[Y0] * loglik0[Y0])
+        // For Y=0 observations
         if (Y0.n_elem > 0)
         {
-            loglik += sum(weights.elem(Y0) % loglik0.elem(Y0));
+            mu_zero = calculate_mu(X_zero * parms.subvec(0, kz - 1) + offset_zero);
+            arma::vec loglik0_zero = theta * log_theta - theta * log(theta + mu_zero);
+            loglik += arma::dot(w_zero, loglik0_zero);
         }
 
-        // For Y>0 observations: sum(weights[Y1] * log(1 - exp(loglik0[Y1])))
+        // For Y>0 observations
         if (Y1.n_elem > 0)
         {
-            arma::vec temp = log1mexp(loglik0.elem(Y1));
-            loglik += sum(weights.elem(Y1) % temp);
+            mu_pos = calculate_mu(X_pos * parms.subvec(0, kz - 1) + offset_pos);
+            arma::vec loglik0_pos = theta * log_theta - theta * log(theta + mu_pos);
+            arma::vec temp = log1mexp(loglik0_pos);
+            loglik += arma::dot(w_pos, temp);
         }
 
         // Return negative log-likelihood for minimization
@@ -539,63 +588,41 @@ public:
         // Get number of parameters
         int kz = X.n_cols;
 
-        // Calculate eta = X * parms[0:kz-1] + offset
-        arma::vec eta = X * parms.subvec(0, kz - 1) + offset;
-
-        // Calculate mu = exp(eta)
-        arma::vec mu = calculate_mu(eta);
-
-        // Calculate theta = exp(parms[kz])
         double theta = exp(parms(kz));
-
-        // Vectorized log probability of zero
-        arma::vec loglik0 = theta * log(theta) - theta * log(theta + mu);
+        double log_theta = log(theta);
 
         // Initialize gradient for beta parameters
         arma::vec grad_beta = arma::zeros<arma::vec>(kz);
-
-        // Pre-compute mu subsets (reused for both beta and theta gradients)
-        arma::vec mu_0, mu_1;
-        if (Y0.n_elem > 0)
-            mu_0 = mu.elem(Y0);
-        if (Y1.n_elem > 0)
-            mu_1 = mu.elem(Y1);
-
-        // For Y=0 observations: -mu * theta / (mu + theta)
-        if (Y0.n_elem > 0)
-        {
-            arma::vec term1 = -mu_0 * theta / (mu_0 + theta);
-            grad_beta += X.rows(Y0).t() * (weights.elem(Y0) % term1);
-        }
-
-        // For Y>0 observations
-        if (Y1.n_elem > 0)
-        {
-            arma::vec loglik0_1 = loglik0.elem(Y1);
-            arma::vec logratio = loglik0_1 - log1mexp(loglik0_1);
-            arma::vec term2 = exp(logratio + log(theta) - log(mu_1 + theta) + eta.elem(Y1));
-            grad_beta += X.rows(Y1).t() * (weights.elem(Y1) % term2);
-        }
-
-        // Vectorized gradient for log(theta)
         double grad_logtheta = 0.0;
 
         // For Y=0 observations
         if (Y0.n_elem > 0)
         {
+            arma::vec eta_0 = X_zero * parms.subvec(0, kz - 1) + offset_zero;
+            arma::vec mu_0 = calculate_mu(eta_0);
+
+            arma::vec term1 = -mu_0 * theta / (mu_0 + theta);
+            grad_beta += X_zero.t() * (w_zero % term1);
+
             arma::vec mu_theta_0 = mu_0 + theta;
-            arma::vec term_theta_0 = log(theta) - log(mu_theta_0) + 1.0 - theta / mu_theta_0;
-            grad_logtheta += sum(weights.elem(Y0) % term_theta_0);
+            arma::vec term_theta_0 = log_theta - log(mu_theta_0) + 1.0 - theta / mu_theta_0;
+            grad_logtheta += arma::dot(w_zero, term_theta_0);
         }
 
         // For Y>0 observations
         if (Y1.n_elem > 0)
         {
-            arma::vec mu_theta_1 = mu_1 + theta;
-            arma::vec loglik0_1 = loglik0.elem(Y1);
+            arma::vec eta_1 = X_pos * parms.subvec(0, kz - 1) + offset_pos;
+            arma::vec mu_1 = calculate_mu(eta_1);
+
+            arma::vec loglik0_1 = theta * log_theta - theta * log(theta + mu_1);
             arma::vec logratio = loglik0_1 - log1mexp(loglik0_1);
-            arma::vec term_theta_1 = exp(logratio) % (log(theta) - log(mu_theta_1) + 1.0 - theta / mu_theta_1);
-            grad_logtheta -= sum(weights.elem(Y1) % term_theta_1);
+            arma::vec term2 = exp(logratio + log_theta - log(mu_1 + theta) + eta_1);
+            grad_beta += X_pos.t() * (w_pos % term2);
+
+            arma::vec mu_theta_1 = mu_1 + theta;
+            arma::vec term_theta_1 = exp(logratio) % (log_theta - log(mu_theta_1) + 1.0 - theta / mu_theta_1);
+            grad_logtheta -= arma::dot(w_pos, term_theta_1);
         }
 
         grad_logtheta *= theta;
@@ -657,14 +684,24 @@ private:
     links::LinkFunction linkinv_func;
     links::LinkFunction mu_eta_func;
     std::string link_name;
+    bool is_logit; // Fast path for logit link
+
+    // Cached binary indicator for logit fast path: 1.0 for Y>0, 0.0 for Y=0
+    arma::vec Y_binary;
 
 public:
     ZeroBinomFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w,
                      const std::string &link = "logit")
-        : LikelihoodFunctor(y, x, offs, w), link_name(link)
+        : LikelihoodFunctor(y, x, offs, w), link_name(link), is_logit(link == "logit")
     {
         linkinv_func = links::get_linkinv(link);
         mu_eta_func = links::get_mu_eta(link);
+
+        // For logit fast path, pre-compute binary indicator
+        if (is_logit)
+        {
+            Y_binary = arma::conv_to<arma::vec>::from(Y > 0);
+        }
     }
 
     double operator()(const arma::vec &parms) override
@@ -672,27 +709,46 @@ public:
         // Calculate eta = X * parms + offset
         arma::vec eta = calculate_eta(parms);
 
-        // Calculate mu = linkinv(eta)
+        if (is_logit)
+        {
+            // Logit fast path: use numerically stable softplus
+            // log(sigmoid(x))  = -softplus(-x) where softplus(x) = log(1+exp(x))
+            // log(1-sigmoid(x)) = -softplus(x)
+            // Stabilized: softplus(x) = max(x,0) + log1p(exp(-|x|))
+            double loglik = 0.0;
+            if (Y1.n_elem > 0)
+            {
+                // -log(sigmoid(eta)) = softplus(-eta) = max(-eta,0) + log1p(exp(-|-eta|))
+                arma::vec eta_pos = eta.elem(Y1);
+                arma::vec sp = arma::max(-eta_pos, arma::zeros(eta_pos.n_elem)) +
+                               log1p(exp(-abs(eta_pos)));
+                loglik -= arma::dot(w_pos, sp);
+            }
+            if (Y0.n_elem > 0)
+            {
+                // -log(1-sigmoid(eta)) = softplus(eta) = max(eta,0) + log1p(exp(-|eta|))
+                arma::vec eta_zero = eta.elem(Y0);
+                arma::vec sp = arma::max(eta_zero, arma::zeros(eta_zero.n_elem)) +
+                               log1p(exp(-abs(eta_zero)));
+                loglik -= arma::dot(w_zero, sp);
+            }
+            return -loglik;
+        }
+
+        // General link path
         arma::vec mu = linkinv_func(eta);
 
-        // Calculate log-likelihood
         double loglik = 0.0;
-
-        // For Y=0 observations: sum(weights[Y0] * log(1 - mu[Y0]))
         if (Y0.n_elem > 0)
         {
             arma::vec temp = log(1.0 - mu.elem(Y0));
-            loglik += sum(weights.elem(Y0) % temp);
+            loglik += arma::dot(w_zero, temp);
         }
-
-        // For Y>0 observations: sum(weights[Y1] * log(mu[Y1]))
         if (Y1.n_elem > 0)
         {
             arma::vec temp = log(mu.elem(Y1));
-            loglik += sum(weights.elem(Y1) % temp);
+            loglik += arma::dot(w_pos, temp);
         }
-
-        // Return negative log-likelihood for minimization
         return -loglik;
     }
 
@@ -701,34 +757,33 @@ public:
         // Calculate eta = X * parms + offset
         arma::vec eta = calculate_eta(parms);
 
-        // Calculate mu = linkinv(eta), clamped to avoid division by zero
-        arma::vec mu = arma::clamp(linkinv_func(eta), 1e-15, 1.0 - 1e-15);
+        if (is_logit)
+        {
+            // Logit fast path: gradient = X' * (weights % (Y_binary - mu))
+            // For logit: d/d(beta) = sum_i w_i * (y_i - mu_i) * x_i
+            // where y_i is 1 for Y>0 and 0 for Y=0
+            arma::vec mu = 1.0 / (1.0 + exp(-eta));
+            grad = X.t() * (weights % (Y_binary - mu));
+            grad = -grad;
+            return;
+        }
 
-        // Calculate mu_eta (derivative of mu with respect to eta)
+        // General link path
+        arma::vec mu = arma::clamp(linkinv_func(eta), 1e-15, 1.0 - 1e-15);
         arma::vec mu_eta_vec = mu_eta_func(eta);
 
-        // Initialize gradient term
         arma::vec grad_term = arma::zeros<arma::vec>(X.n_rows);
-
-        // For Y=0 observations: -1 / (1 - mu)
         if (Y0.n_elem > 0)
         {
             grad_term.elem(Y0) = -1.0 / (1.0 - mu.elem(Y0));
         }
-
-        // For Y>0 observations: 1 / mu
         if (Y1.n_elem > 0)
         {
             grad_term.elem(Y1) = 1.0 / mu.elem(Y1);
         }
-
-        // Apply mu_eta (derivative of mu with respect to eta)
         grad_term = grad_term % mu_eta_vec;
 
-        // Calculate the gradient
         grad = X.t() * (weights % grad_term);
-
-        // Return negative gradient for minimization
         grad = -grad;
     }
 
@@ -1041,4 +1096,39 @@ Rcpp::List optim_joint_cpp(
     // Run optimization
     arma::vec par = start;
     return run_optimization(functor, par, method, hessian, maxit, reltol);
+}
+
+// [[Rcpp::export]]
+Rcpp::List compute_negbin_hurdle_fitted_cpp(
+    const arma::vec &coefc,
+    const arma::vec &coefz,
+    const arma::mat &X,
+    const arma::mat &Z,
+    const arma::vec &offsetx,
+    const arma::vec &offsetz,
+    double theta,
+    const arma::vec &y)
+{
+    // Count component: mu = exp(X * coefc + offsetx)
+    arma::vec mu = exp(X * coefc + offsetx);
+
+    // Zero component (logit link): phi = sigmoid(Z * coefz + offsetz)
+    arma::vec eta_z = Z * coefz + offsetz;
+    arma::vec phi = 1.0 / (1.0 + exp(-eta_z));
+
+    // log P(Y > 0 | NB) = log(1 - (theta/(theta+mu))^theta)
+    // = log1mexp(theta * log(theta/(theta+mu)))
+    // = log1mexp(theta * (log(theta) - log(theta+mu)))
+    arma::vec log_p0_nb = theta * (log(theta) - log(theta + mu));
+    arma::vec log_p1_nb = log1mexp(log_p0_nb);
+
+    // Fitted values: Yhat = exp(log(phi) - log_p1_nb + log(mu))
+    arma::vec Yhat = exp(log(phi) - log_p1_nb + log(mu));
+
+    // Residuals
+    arma::vec res = y - Yhat;
+
+    return Rcpp::List::create(
+        Rcpp::Named("fitted.values") = Yhat,
+        Rcpp::Named("residuals") = res);
 }

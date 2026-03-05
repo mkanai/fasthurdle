@@ -33,3 +33,7 @@ optim_joint_cpp <- function(start, Y, X, offsetx, Z, offsetz, weights, dist = "p
     .Call(`_fasthurdle_optim_joint_cpp`, start, Y, X, offsetx, Z, offsetz, weights, dist, zero_dist, link, method, hessian, maxit, reltol)
 }
 
+compute_negbin_hurdle_fitted_cpp <- function(coefc, coefz, X, Z, offsetx, offsetz, theta, y) {
+    .Call(`_fasthurdle_compute_negbin_hurdle_fitted_cpp`, coefc, coefz, X, Z, offsetx, offsetz, theta, y)
+}
+

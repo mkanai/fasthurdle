@@ -98,26 +98,7 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, m
       method = method, hessian = TRUE, maxit = maxit, reltol = reltol
     )
 
-    # Convert to compatible format
-    fit_count_compat <- list(
-      par = fit_count$par,
-      value = fit_count$value,
-      counts = fit_count$counts,
-      convergence = fit_count$convergence,
-      message = fit_count$message,
-      hessian = fit_count$hessian
-    )
-
-    fit_zero_compat <- list(
-      par = fit_zero$par,
-      value = fit_zero$value,
-      counts = fit_zero$counts,
-      convergence = fit_zero$convergence,
-      message = fit_zero$message,
-      hessian = fit_zero$hessian
-    )
-
-    fit <- list(count = fit_count_compat, zero = fit_zero_compat)
+    fit <- list(count = fit_count, zero = fit_zero)
 
     # Extract coefficients
     coefc <- fit_count$par[1:kx]
@@ -216,24 +197,13 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, m
     paste("zero", colnames(Z), sep = "_")
   )
 
-  # Calculate fitted values
-  # Calculate zero component
-  phi <- linkinv(Z %*% coefz + offsetz)[, 1]
-
-  # Calculate probability of zero
-  p0_zero <- log(phi)
-
-  # Calculate count component
-  mu <- exp(X %*% coefc + offsetx)[, 1]
-
-  # Calculate probability of zero in count model
-  p0_count <- pnbinom(0, size = theta["count"], mu = mu, lower.tail = FALSE, log.p = TRUE)
-
-  # Calculate fitted values
-  Yhat <- exp((p0_zero - p0_count) + log(mu))
-
-  # Calculate residuals
-  res <- y - Yhat
+  # Calculate fitted values and residuals in C++
+  fitted_result <- compute_negbin_hurdle_fitted_cpp(
+    coefc, coefz, X, Z, offsetx, offsetz, theta["count"], y
+  )
+  Yhat <- fitted_result$fitted.values
+  names(Yhat) <- rownames(X)
+  res <- fitted_result$residuals
 
   # Calculate effective observations
   nobs <- sum(weights > 0)
