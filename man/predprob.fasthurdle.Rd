@@ -4,7 +4,7 @@
 \alias{predprob.fasthurdle}
 \title{Predict Probabilities from a Hurdle Model}
 \usage{
-predprob.fasthurdle(obj, ...)
+\method{predprob}{fasthurdle}(obj, ...)
 }
 \arguments{
 \item{obj}{A fitted model object of class "fasthurdle".}

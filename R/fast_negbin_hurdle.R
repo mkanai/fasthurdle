@@ -5,8 +5,9 @@
 #' with binomial zero hurdle model and logit link. This function is optimized
 #' for speed by skipping all unnecessary parameter checks and validations.
 #'
-#' @param X Model matrix for both count and zero components
+#' @param X Model matrix for the count component (and zero component if Z is NULL)
 #' @param y Response vector of counts
+#' @param Z Optional model matrix for the zero component. Default is NULL (use X).
 #' @param offsetx Optional offset vector for the count model. Default is NULL (no offset).
 #' @param offsetz Optional offset vector for the zero model. Default is NULL (no offset).
 #' @param method Optimization method used by optim. Default is "BFGS".
@@ -36,7 +37,7 @@
 #' }
 #'
 #' @export
-fast_negbin_hurdle <- function(X, y, offsetx = NULL, offsetz = NULL, method = "BFGS", maxit = 10000, separate = TRUE) {
+fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, method = "BFGS", maxit = 10000, separate = TRUE) {
   # Fixed parameters
   dist <- "negbin"
   zero.dist <- "binomial"
@@ -48,8 +49,9 @@ fast_negbin_hurdle <- function(X, y, offsetx = NULL, offsetz = NULL, method = "B
 
   # Set up model dimensions
   n <- length(y)
+  if (is.null(Z)) Z <- X
   kx <- NCOL(X)
-  kz <- NCOL(X) # Using same matrix for both components
+  kz <- NCOL(Z)
 
   # Set up weights and offsets
   weights <- rep.int(1, n)
@@ -60,7 +62,7 @@ fast_negbin_hurdle <- function(X, y, offsetx = NULL, offsetz = NULL, method = "B
   # For count model
   model_count <- fastglm::fastglm(X, y, family = poisson(), weights = weights, offset = offsetx)
   # For zero model - for binomial zero model, we use binomial family with logit link
-  model_zero <- suppressWarnings(fastglm::fastglm(X, as.integer(y > 0), family = binomial(link = linkstr), weights = weights, offset = offsetz))
+  model_zero <- suppressWarnings(fastglm::fastglm(Z, as.integer(y > 0), family = binomial(link = linkstr), weights = weights, offset = offsetz))
 
   # Combine results
   start <- list(
@@ -90,7 +92,7 @@ fast_negbin_hurdle <- function(X, y, offsetx = NULL, offsetz = NULL, method = "B
     # Estimate zero component
     fit_zero <- optim_zero_binom_cpp(
       start = c(start$zero),
-      Y = y, X = X, offsetx = offsetz, weights = weights,
+      Y = y, X = Z, offsetx = offsetz, weights = weights,
       link = linkstr,
       method = method, hessian = TRUE
     )
@@ -160,7 +162,7 @@ fast_negbin_hurdle <- function(X, y, offsetx = NULL, offsetz = NULL, method = "B
         start$count, log(start$theta["count"]),
         start$zero
       ),
-      Y = y, X = X, offsetx = offsetx, Z = X, offsetz = offsetz, weights = weights,
+      Y = y, X = X, offsetx = offsetx, Z = Z, offsetz = offsetz, weights = weights,
       dist = dist, zero_dist = zero.dist,
       link = linkstr,
       method = method, hessian = TRUE
@@ -207,15 +209,15 @@ fast_negbin_hurdle <- function(X, y, offsetx = NULL, offsetz = NULL, method = "B
 
   # Set coefficient names
   names(coefc) <- colnames(X)
-  names(coefz) <- colnames(X)
+  names(coefz) <- colnames(Z)
   colnames(vc) <- rownames(vc) <- c(
     paste("count", colnames(X), sep = "_"),
-    paste("zero", colnames(X), sep = "_")
+    paste("zero", colnames(Z), sep = "_")
   )
 
   # Calculate fitted values
   # Calculate zero component
-  phi <- linkinv(X %*% coefz + offsetz)[, 1]
+  phi <- linkinv(Z %*% coefz + offsetz)[, 1]
 
   # Calculate probability of zero
   p0_zero <- log(phi)
@@ -263,7 +265,7 @@ fast_negbin_hurdle <- function(X, y, offsetx = NULL, offsetz = NULL, method = "B
     converged = converged,
     call = match.call(),
     y = y,
-    x = list(count = X, zero = X)
+    x = list(count = X, zero = Z)
   )
 
   class(rval) <- "fasthurdle"

@@ -290,7 +290,7 @@ public:
 
         // Vectorized negative binomial log probability
         arma::vec loglik1 = lgamma_y_theta - lgamma(theta) - lgamma_y_1 +
-                            Y_pos % log(mu) - (Y_pos + theta) % log(mu + theta);
+                            Y_pos % log(mu) + theta * log(theta) - (Y_pos + theta) % log(mu + theta);
 
         // Calculate log-likelihood
         double loglik = sum(weights.elem(Y1) % loglik1) - sum(weights.elem(Y1) % log(1.0 - exp(loglik0)));

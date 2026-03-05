@@ -4,12 +4,27 @@
 \alias{fast_negbin_hurdle}
 \title{Fast Negative Binomial Hurdle Model with Binomial Zero Hurdle}
 \usage{
-fast_negbin_hurdle(X, y, method = "BFGS", maxit = 10000, separate = TRUE)
+fast_negbin_hurdle(
+  X,
+  y,
+  Z = NULL,
+  offsetx = NULL,
+  offsetz = NULL,
+  method = "BFGS",
+  maxit = 10000,
+  separate = TRUE
+)
 }
 \arguments{
-\item{X}{Model matrix for both count and zero components}
+\item{X}{Model matrix for the count component (and zero component if Z is NULL)}
 
 \item{y}{Response vector of counts}
+
+\item{Z}{Optional model matrix for the zero component. Default is NULL (use X).}
+
+\item{offsetx}{Optional offset vector for the count model. Default is NULL (no offset).}
+
+\item{offsetz}{Optional offset vector for the zero model. Default is NULL (no offset).}
 
 \item{method}{Optimization method used by optim. Default is "BFGS".}
 

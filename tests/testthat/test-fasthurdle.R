@@ -494,3 +494,103 @@ test_that("fasthurdle produces the same results as pscl::hurdle for all link fun
     })
   }
 })
+
+# Test that fasthurdle with offset and different count/zero formulas matches pscl::hurdle
+test_that("fasthurdle with offset and different count/zero formulas matches pscl::hurdle", {
+  set.seed(42)
+  n <- 500
+  x <- rnorm(n)
+  log_depth <- rnorm(n, mean = 8, sd = 1) # simulated log library size
+
+  # Generate data where depth is offset in count and covariate in zero
+  lambda <- exp(0.5 + 0.3 * x + log_depth)
+  p <- plogis(-2 + 0.5 * x + 0.8 * log_depth)
+  y <- rbinom(n, size = 1, prob = p) * rnbinom(n, size = 2, mu = lambda)
+
+  df <- data.frame(y = y, x = x, log_depth = log_depth)
+
+  # Fit models: offset in count, extra covariate in zero
+  fast_model <- fasthurdle(y ~ x + offset(log_depth) | x + log_depth,
+    data = df,
+    dist = "negbin",
+    zero.dist = "binomial",
+    link = "logit"
+  )
+
+  pscl_model <- pscl::hurdle(y ~ x + offset(log_depth) | x + log_depth,
+    data = df,
+    dist = "negbin",
+    zero.dist = "binomial",
+    link = "logit"
+  )
+
+  # Check coefficients
+  expect_equal(coef(fast_model, model = "count"),
+    coef(pscl_model, model = "count"),
+    tolerance = 1e-3,
+    info = "Count coefficients differ with offset and different formulas"
+  )
+
+  expect_equal(coef(fast_model, model = "zero"),
+    coef(pscl_model, model = "zero"),
+    tolerance = 1e-3,
+    info = "Zero coefficients differ with offset and different formulas"
+  )
+
+  # Check log-likelihood
+  expect_equal(logLik(fast_model),
+    logLik(pscl_model),
+    tolerance = 1e-3,
+    info = "Log-likelihood differs with offset and different formulas"
+  )
+
+  # Check fitted values
+  expect_equal(fitted(fast_model),
+    fitted(pscl_model),
+    tolerance = 1e-3,
+    info = "Fitted values differ with offset and different formulas"
+  )
+
+  # Check theta
+  expect_equal(fast_model$theta["count"],
+    pscl_model$theta["count"],
+    tolerance = 1e-2,
+    info = "Count theta differs with offset and different formulas"
+  )
+
+  # Compare summary outputs
+  fast_summary <- summary(fast_model)
+  pscl_summary <- summary(pscl_model)
+
+  expect_equal(
+    fast_summary$count$coefficients[, "Estimate"],
+    pscl_summary$count$coefficients[, "Estimate"],
+    tolerance = 1e-3,
+    info = "Count estimates differ in summary with offset and different formulas"
+  )
+
+  expect_equal(
+    fast_summary$count$coefficients[, "Std. Error"],
+    pscl_summary$count$coefficients[, "Std. Error"],
+    tolerance = 1e-2,
+    info = "Count SEs differ in summary with offset and different formulas"
+  )
+
+  expect_equal(
+    fast_summary$zero$coefficients[, "Estimate"],
+    pscl_summary$zero$coefficients[, "Estimate"],
+    tolerance = 1e-3,
+    info = "Zero estimates differ in summary with offset and different formulas"
+  )
+
+  expect_equal(
+    fast_summary$zero$coefficients[, "Std. Error"],
+    pscl_summary$zero$coefficients[, "Std. Error"],
+    tolerance = 1e-2,
+    info = "Zero SEs differ in summary with offset and different formulas"
+  )
+
+  # Verify different number of coefficients in count vs zero
+  expect_equal(length(coef(fast_model, model = "count")), 2) # intercept + x
+  expect_equal(length(coef(fast_model, model = "zero")), 3) # intercept + x + log_depth
+})
