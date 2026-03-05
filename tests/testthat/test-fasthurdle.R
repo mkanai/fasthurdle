@@ -36,26 +36,26 @@ compare_hurdle_models <- function(df, count_dist, zero_dist, link = "logit") {
     data = df, dist = count_dist, zero.dist = zero_dist, link = link
   )
 
-  # When zero_dist="negbin", the zero NB theta is often poorly identified
-  # (flat likelihood surface), so different optimizers converge to different
-  # parameter combinations that yield nearly identical log-likelihoods.
-  # Use relaxed tolerances for such cases.
+  # When zero_dist="negbin", the zero NB theta is poorly identified
+  # (flat likelihood surface), leading to slightly different optima
+  # that yield nearly identical log-likelihoods. Use mildly relaxed
+  # tolerances for the zero component in such cases.
   zero_negbin <- (zero_dist == "negbin")
-  coef_tol <- if (zero_negbin) 0.1 else 1e-3
-  fitted_tol <- if (zero_negbin) 1e-2 else 1e-3
-  se_tol <- if (zero_negbin) 0.1 else 1e-2
+  coef_tol <- if (zero_negbin) 1e-4 else 1e-6
+  fitted_tol <- 1e-6
+  se_tol <- if (zero_negbin) 1e-2 else 1e-6
 
   # Coefficients
   expect_equal(coef(fast_model, model = "count"), coef(pscl_model, model = "count"),
-    tolerance = 1e-3, info = paste(desc, "count coefs")
+    tolerance = 1e-6, info = paste(desc, "count coefs")
   )
   expect_equal(coef(fast_model, model = "zero"), coef(pscl_model, model = "zero"),
     tolerance = coef_tol, info = paste(desc, "zero coefs")
   )
 
-  # Log-likelihood (should always match closely, even when parameters differ)
+  # Log-likelihood
   expect_equal(logLik(fast_model), logLik(pscl_model),
-    tolerance = 1e-3, info = paste(desc, "logLik")
+    tolerance = 1e-6, info = paste(desc, "logLik")
   )
 
   # Fitted values
@@ -66,13 +66,12 @@ compare_hurdle_models <- function(df, count_dist, zero_dist, link = "logit") {
   # Theta (compare on log scale for stability when theta is large)
   if (count_dist == "negbin") {
     expect_equal(log(fast_model$theta["count"]), log(pscl_model$theta["count"]),
-      tolerance = 0.1, info = paste(desc, "count log(theta)")
+      tolerance = 1e-6, info = paste(desc, "count log(theta)")
     )
   }
   if (zero_dist == "negbin") {
-    # Zero NB theta can vary widely on flat surface; just check same order of magnitude
     expect_equal(log(fast_model$theta["zero"]), log(pscl_model$theta["zero"]),
-      tolerance = 1.0, info = paste(desc, "zero log(theta)")
+      tolerance = 1e-2, info = paste(desc, "zero log(theta)")
     )
   }
 
@@ -83,12 +82,12 @@ compare_hurdle_models <- function(df, count_dist, zero_dist, link = "logit") {
   expect_equal(
     fast_summary$coefficients$count[, "Estimate"],
     pscl_summary$coefficients$count[, "Estimate"],
-    tolerance = 1e-3, info = paste(desc, "summary count estimates")
+    tolerance = 1e-6, info = paste(desc, "summary count estimates")
   )
   expect_equal(
     fast_summary$coefficients$count[, "Std. Error"],
     pscl_summary$coefficients$count[, "Std. Error"],
-    tolerance = 1e-2, info = paste(desc, "summary count SEs")
+    tolerance = 1e-6, info = paste(desc, "summary count SEs")
   )
   expect_equal(
     fast_summary$coefficients$zero[, "Estimate"],
@@ -101,10 +100,10 @@ compare_hurdle_models <- function(df, count_dist, zero_dist, link = "logit") {
     tolerance = se_tol, info = paste(desc, "summary zero SEs")
   )
   expect_equal(fast_summary$loglik, pscl_summary$loglik,
-    tolerance = 1e-3, info = paste(desc, "summary loglik")
+    tolerance = 1e-6, info = paste(desc, "summary loglik")
   )
   expect_equal(AIC(fast_model), AIC(pscl_model),
-    tolerance = 1e-3, info = paste(desc, "AIC")
+    tolerance = 1e-6, info = paste(desc, "AIC")
   )
 }
 
@@ -192,14 +191,14 @@ test_that("fasthurdle with offset and different count/zero formulas matches pscl
   )
 
   expect_equal(coef(fast_model, model = "count"), coef(pscl_model, model = "count"),
-    tolerance = 1e-3
+    tolerance = 1e-6
   )
   expect_equal(coef(fast_model, model = "zero"), coef(pscl_model, model = "zero"),
-    tolerance = 1e-3
+    tolerance = 1e-6
   )
-  expect_equal(logLik(fast_model), logLik(pscl_model), tolerance = 1e-3)
-  expect_equal(fitted(fast_model), fitted(pscl_model), tolerance = 1e-3)
-  expect_equal(fast_model$theta["count"], pscl_model$theta["count"], tolerance = 1e-2)
+  expect_equal(logLik(fast_model), logLik(pscl_model), tolerance = 1e-6)
+  expect_equal(fitted(fast_model), fitted(pscl_model), tolerance = 1e-6)
+  expect_equal(fast_model$theta["count"], pscl_model$theta["count"], tolerance = 1e-6)
 
   fast_summary <- summary(fast_model)
   pscl_summary <- summary(pscl_model)
@@ -207,22 +206,22 @@ test_that("fasthurdle with offset and different count/zero formulas matches pscl
   expect_equal(
     fast_summary$coefficients$count[, "Estimate"],
     pscl_summary$coefficients$count[, "Estimate"],
-    tolerance = 1e-3
+    tolerance = 1e-6
   )
   expect_equal(
     fast_summary$coefficients$count[, "Std. Error"],
     pscl_summary$coefficients$count[, "Std. Error"],
-    tolerance = 1e-2
+    tolerance = 1e-6
   )
   expect_equal(
     fast_summary$coefficients$zero[, "Estimate"],
     pscl_summary$coefficients$zero[, "Estimate"],
-    tolerance = 1e-3
+    tolerance = 1e-6
   )
   expect_equal(
     fast_summary$coefficients$zero[, "Std. Error"],
     pscl_summary$coefficients$zero[, "Std. Error"],
-    tolerance = 1e-2
+    tolerance = 1e-6
   )
 
   expect_length(coef(fast_model, model = "count"), 2)

@@ -24,33 +24,33 @@ test_that("fast_negbin_hurdle produces the same results as fasthurdle with negbi
     link = "logit"
   )
 
-  # Check that coefficients are the same (with relaxed tolerance due to different optimization paths)
+  # Check that coefficients are identical (same optimization path)
   expect_equal(coef(fast_model, model = "count"),
     coef(regular_model, model = "count"),
-    tolerance = 1e-2
+    tolerance = 1e-6
   )
 
   expect_equal(coef(fast_model, model = "zero"),
     coef(regular_model, model = "zero"),
-    tolerance = 1e-2
+    tolerance = 1e-6
   )
 
   # Check that log-likelihood is the same
   expect_equal(logLik(fast_model),
     logLik(regular_model),
-    tolerance = 1e-3
+    tolerance = 1e-6
   )
 
   # Check that fitted values are the same
   expect_equal(fitted(fast_model),
     fitted(regular_model),
-    tolerance = 1e-3
+    tolerance = 1e-6
   )
 
-  # Check count theta parameter (with relaxed tolerance due to different optimization paths)
+  # Check count theta parameter
   expect_equal(fast_model$theta["count"],
     regular_model$theta["count"],
-    tolerance = 0.2
+    tolerance = 1e-6
   )
 })
 
@@ -79,34 +79,34 @@ test_that("fast_negbin_hurdle with Z matrix produces the same results as fasthur
     link = "logit"
   )
 
-  # Check count coefficients
+  # Check count coefficients (identical optimization path)
   expect_equal(coef(fast_model, model = "count"),
     coef(regular_model, model = "count"),
-    tolerance = 1e-2
+    tolerance = 1e-6
   )
 
   # Check zero coefficients
   expect_equal(coef(fast_model, model = "zero"),
     coef(regular_model, model = "zero"),
-    tolerance = 1e-2
+    tolerance = 1e-6
   )
 
   # Check log-likelihood
   expect_equal(logLik(fast_model),
     logLik(regular_model),
-    tolerance = 1e-3
+    tolerance = 1e-6
   )
 
   # Check fitted values
   expect_equal(fitted(fast_model),
     fitted(regular_model),
-    tolerance = 1e-3
+    tolerance = 1e-6
   )
 
   # Check theta
   expect_equal(fast_model$theta["count"],
     regular_model$theta["count"],
-    tolerance = 0.2
+    tolerance = 1e-6
   )
 
   # Verify dimensions: count has 2 coefs, zero has 3 coefs

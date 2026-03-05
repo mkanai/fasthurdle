@@ -183,6 +183,7 @@ The use of hurdle models for peak-gene link analysis in single-nucleus multiome 
 ### v1.1 (2026-03-05)
 
 - **Bug fix**: Fixed missing `theta*log(theta)` term in the negative binomial count model log-likelihood (`CountNegBinFunctor`). This caused incorrect theta and coefficient estimates for all negbin count models. The analytical gradient was correct, but the inconsistency with the function value caused BFGS line search failures.
+- **Bug fix**: Fixed `maxit` and `reltol` from `hurdle.control()` not being forwarded to the C++ optimizer. The roptim library defaulted to `maxit=100` instead of the intended `10000`, causing premature convergence.
 - **New feature**: Added `Z` parameter to `fast_negbin_hurdle()` for specifying a separate design matrix for the zero component. This enables use cases like scRNA-seq depth correction, where `log(library_size)` is an offset in the count model but a covariate in the zero model.
 - **New feature**: Added `offsetx` and `offsetz` parameters to `fast_negbin_hurdle()` for specifying offsets in the count and zero components.
 
