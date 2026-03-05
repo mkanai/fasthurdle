@@ -407,41 +407,18 @@ public:
 
     void Gradient(const arma::vec &parms, arma::vec &grad) override
     {
-        // If no Y>0 observations, return zero gradient
-        if (Y1.n_elem == 0)
-        {
-            grad = arma::zeros<arma::vec>(parms.n_elem);
-            return;
-        }
+        // Create a new parameter vector with an additional element for theta = 1 (log(theta) = 0)
+        arma::vec parms_extended(parms.n_elem + 1);
+        parms_extended.subvec(0, parms.n_elem - 1) = parms;
+        parms_extended(parms.n_elem) = 0.0; // log(1) = 0
 
-        // Calculate eta = X * parms + offset for Y>0 observations
-        arma::vec eta = X.rows(Y1) * parms + offset.elem(Y1);
+        // Use the shared CountNegBinFunctor instance for gradient calculation
+        arma::vec grad_extended;
+        negbin_functor->Gradient(parms_extended, grad_extended);
 
-        // Calculate mu = exp(eta)
-        arma::vec mu = exp(eta);
-
-        // Get Y values for positive observations
-        arma::vec Y_pos = Y.elem(Y1);
-
-        // Vectorized calculation of the first term: Y[Y1] - mu * (Y[Y1] + 1) / (mu + 1)
-        arma::vec mu_plus_one = mu + 1.0;
-        arma::vec term1 = Y_pos - mu % (Y_pos + 1.0) / mu_plus_one;
-
-        // Vectorized calculation of log probability of zero for geometric (theta=1)
-        arma::vec loglik0 = log(1.0) - log(mu_plus_one); // Simplified: log(1/(mu+1))
-
-        // Vectorized second term
-        arma::vec logratio = loglik0 - log1mexp(loglik0);
-        arma::vec term2 = exp(logratio - log(mu_plus_one) + eta);
-
-        // Vectorized gradient calculation
-        arma::vec grad_term = term1 - term2;
-
-        // Single matrix multiplication
-        grad = X.rows(Y1).t() * (weights.elem(Y1) % grad_term);
-
-        // Return negative gradient for minimization
-        grad = -grad;
+        // Return only the gradient for the original parameters (exclude theta)
+        grad = arma::zeros<arma::vec>(parms.n_elem);
+        grad.subvec(0, parms.n_elem - 1) = grad_extended.subvec(0, parms.n_elem - 1);
     }
 };
 
@@ -577,10 +554,16 @@ public:
         // Initialize gradient for beta parameters
         arma::vec grad_beta = arma::zeros<arma::vec>(kz);
 
+        // Pre-compute mu subsets (reused for both beta and theta gradients)
+        arma::vec mu_0, mu_1;
+        if (Y0.n_elem > 0)
+            mu_0 = mu.elem(Y0);
+        if (Y1.n_elem > 0)
+            mu_1 = mu.elem(Y1);
+
         // For Y=0 observations: -mu * theta / (mu + theta)
         if (Y0.n_elem > 0)
         {
-            arma::vec mu_0 = mu.elem(Y0);
             arma::vec term1 = -mu_0 * theta / (mu_0 + theta);
             grad_beta += X.rows(Y0).t() * (weights.elem(Y0) % term1);
         }
@@ -588,7 +571,6 @@ public:
         // For Y>0 observations
         if (Y1.n_elem > 0)
         {
-            arma::vec mu_1 = mu.elem(Y1);
             arma::vec loglik0_1 = loglik0.elem(Y1);
             arma::vec logratio = loglik0_1 - log1mexp(loglik0_1);
             arma::vec term2 = exp(logratio + log(theta) - log(mu_1 + theta) + eta.elem(Y1));
@@ -601,7 +583,6 @@ public:
         // For Y=0 observations
         if (Y0.n_elem > 0)
         {
-            arma::vec mu_0 = mu.elem(Y0);
             arma::vec mu_theta_0 = mu_0 + theta;
             arma::vec term_theta_0 = log(theta) - log(mu_theta_0) + 1.0 - theta / mu_theta_0;
             grad_logtheta += sum(weights.elem(Y0) % term_theta_0);
@@ -610,7 +591,6 @@ public:
         // For Y>0 observations
         if (Y1.n_elem > 0)
         {
-            arma::vec mu_1 = mu.elem(Y1);
             arma::vec mu_theta_1 = mu_1 + theta;
             arma::vec loglik0_1 = loglik0.elem(Y1);
             arma::vec logratio = loglik0_1 - log1mexp(loglik0_1);
@@ -721,8 +701,8 @@ public:
         // Calculate eta = X * parms + offset
         arma::vec eta = calculate_eta(parms);
 
-        // Calculate mu = linkinv(eta)
-        arma::vec mu = linkinv_func(eta);
+        // Calculate mu = linkinv(eta), clamped to avoid division by zero
+        arma::vec mu = arma::clamp(linkinv_func(eta), 1e-15, 1.0 - 1e-15);
 
         // Calculate mu_eta (derivative of mu with respect to eta)
         arma::vec mu_eta_vec = mu_eta_func(eta);

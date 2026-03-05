@@ -158,7 +158,8 @@ fasthurdle <- function(formula, data, subset, na.action, weights, offset,
     weights, dist, zero.dist, linkstr, kx, kz, control$trace
   )
 
-  # Extract control parameters
+  # Extract control parameters (save full copy before nulling fields)
+  control_full <- control
   method <- control$method
   hessian <- control$hessian
   separate <- control$separate
@@ -213,7 +214,7 @@ fasthurdle <- function(formula, data, subset, na.action, weights, offset,
     fitted.values = fitted_values$Yhat,
     optim = fit,
     method = method,
-    control = control,
+    control = control_full,
     start = start,
     weights = if (identical(as.vector(weights), rep.int(1L, n))) NULL else weights,
     offset = list(
@@ -1211,19 +1212,4 @@ model_offset_2 <- function(x, terms = NULL, offset = TRUE) {
   }
   if (!is.null(ans) && !is.numeric(ans)) stop("'offset' must be numeric")
   ans
-}
-
-#' Null-coalescing operator
-#'
-#' @description
-#' Return the first non-NULL value.
-#'
-#' @param x First value.
-#' @param y Second value.
-#'
-#' @return x if x is not NULL, otherwise y.
-#'
-#' @keywords internal
-`%||%` <- function(x, y) {
-  if (is.null(x)) y else x
 }
