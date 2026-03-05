@@ -818,11 +818,18 @@ Rcpp::List run_optimization(
     FunctorType &functor,
     arma::vec &start,
     const std::string &method = "BFGS",
-    bool hessian = true)
+    bool hessian = true,
+    int maxit = 10000,
+    double reltol = -1.0)
 {
     // Create optimizer
     Roptim<FunctorType> opt(method);
     opt.control.trace = 0;
+    opt.control.maxit = maxit;
+    if (reltol > 0.0)
+    {
+        opt.control.reltol = reltol;
+    }
     opt.set_hessian(hessian);
 
     // Optimize
@@ -850,14 +857,16 @@ Rcpp::List optim_count_poisson_cpp(
     const arma::vec &offsetx,
     const arma::vec &weights,
     const std::string &method = "BFGS",
-    bool hessian = true)
+    bool hessian = true,
+    int maxit = 10000,
+    double reltol = -1.0)
 {
     // Create functor
     CountPoissonFunctor functor(Y, X, offsetx, weights);
 
     // Run optimization
     arma::vec par = start;
-    return run_optimization(functor, par, method, hessian);
+    return run_optimization(functor, par, method, hessian, maxit, reltol);
 }
 
 // [[Rcpp::export]]
@@ -868,14 +877,16 @@ Rcpp::List optim_count_negbin_cpp(
     const arma::vec &offsetx,
     const arma::vec &weights,
     const std::string &method = "BFGS",
-    bool hessian = true)
+    bool hessian = true,
+    int maxit = 10000,
+    double reltol = -1.0)
 {
     // Create functor
     CountNegBinFunctor functor(Y, X, offsetx, weights);
 
     // Run optimization
     arma::vec par = start;
-    return run_optimization(functor, par, method, hessian);
+    return run_optimization(functor, par, method, hessian, maxit, reltol);
 }
 
 // [[Rcpp::export]]
@@ -886,14 +897,16 @@ Rcpp::List optim_count_geom_cpp(
     const arma::vec &offsetx,
     const arma::vec &weights,
     const std::string &method = "BFGS",
-    bool hessian = true)
+    bool hessian = true,
+    int maxit = 10000,
+    double reltol = -1.0)
 {
     // Create functor
     CountGeomFunctor functor(Y, X, offsetx, weights);
 
     // Run optimization
     arma::vec par = start;
-    return run_optimization(functor, par, method, hessian);
+    return run_optimization(functor, par, method, hessian, maxit, reltol);
 }
 
 // [[Rcpp::export]]
@@ -904,14 +917,16 @@ Rcpp::List optim_zero_poisson_cpp(
     const arma::vec &offsetx,
     const arma::vec &weights,
     const std::string &method = "BFGS",
-    bool hessian = true)
+    bool hessian = true,
+    int maxit = 10000,
+    double reltol = -1.0)
 {
     // Create functor
     ZeroPoissonFunctor functor(Y, X, offsetx, weights);
 
     // Run optimization
     arma::vec par = start;
-    return run_optimization(functor, par, method, hessian);
+    return run_optimization(functor, par, method, hessian, maxit, reltol);
 }
 
 // [[Rcpp::export]]
@@ -922,14 +937,16 @@ Rcpp::List optim_zero_negbin_cpp(
     const arma::vec &offsetx,
     const arma::vec &weights,
     const std::string &method = "BFGS",
-    bool hessian = true)
+    bool hessian = true,
+    int maxit = 10000,
+    double reltol = -1.0)
 {
     // Create functor
     ZeroNegBinFunctor functor(Y, X, offsetx, weights);
 
     // Run optimization
     arma::vec par = start;
-    return run_optimization(functor, par, method, hessian);
+    return run_optimization(functor, par, method, hessian, maxit, reltol);
 }
 
 // [[Rcpp::export]]
@@ -940,14 +957,16 @@ Rcpp::List optim_zero_geom_cpp(
     const arma::vec &offsetx,
     const arma::vec &weights,
     const std::string &method = "BFGS",
-    bool hessian = true)
+    bool hessian = true,
+    int maxit = 10000,
+    double reltol = -1.0)
 {
     // Create functor
     ZeroGeomFunctor functor(Y, X, offsetx, weights);
 
     // Run optimization
     arma::vec par = start;
-    return run_optimization(functor, par, method, hessian);
+    return run_optimization(functor, par, method, hessian, maxit, reltol);
 }
 
 // [[Rcpp::export]]
@@ -959,14 +978,16 @@ Rcpp::List optim_zero_binom_cpp(
     const arma::vec &weights,
     const std::string &link = "logit",
     const std::string &method = "BFGS",
-    bool hessian = true)
+    bool hessian = true,
+    int maxit = 10000,
+    double reltol = -1.0)
 {
     // Create functor with C++ link function
     ZeroBinomFunctor functor(Y, X, offsetx, weights, link);
 
     // Run optimization
     arma::vec par = start;
-    return run_optimization(functor, par, method, hessian);
+    return run_optimization(functor, par, method, hessian, maxit, reltol);
 }
 
 // [[Rcpp::export]]
@@ -982,7 +1003,9 @@ Rcpp::List optim_joint_cpp(
     const std::string &zero_dist = "binomial",
     const std::string &link = "logit",
     const std::string &method = "BFGS",
-    bool hessian = true)
+    bool hessian = true,
+    int maxit = 10000,
+    double reltol = -1.0)
 {
     // Create count functor based on distribution
     std::shared_ptr<LikelihoodFunctor> count_functor;
@@ -1037,5 +1060,5 @@ Rcpp::List optim_joint_cpp(
 
     // Run optimization
     arma::vec par = start;
-    return run_optimization(functor, par, method, hessian);
+    return run_optimization(functor, par, method, hessian, maxit, reltol);
 }

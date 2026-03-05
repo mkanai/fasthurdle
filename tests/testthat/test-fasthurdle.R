@@ -81,30 +81,30 @@ compare_hurdle_models <- function(df, count_dist, zero_dist, link = "logit") {
   pscl_summary <- summary(pscl_model)
 
   expect_equal(
-    fast_summary$count$coefficients[, "Estimate"],
-    pscl_summary$count$coefficients[, "Estimate"],
+    fast_summary$coefficients$count[, "Estimate"],
+    pscl_summary$coefficients$count[, "Estimate"],
     tolerance = 1e-3, info = paste(desc, "summary count estimates")
   )
   expect_equal(
-    fast_summary$count$coefficients[, "Std. Error"],
-    pscl_summary$count$coefficients[, "Std. Error"],
+    fast_summary$coefficients$count[, "Std. Error"],
+    pscl_summary$coefficients$count[, "Std. Error"],
     tolerance = 1e-2, info = paste(desc, "summary count SEs")
   )
   expect_equal(
-    fast_summary$zero$coefficients[, "Estimate"],
-    pscl_summary$zero$coefficients[, "Estimate"],
+    fast_summary$coefficients$zero[, "Estimate"],
+    pscl_summary$coefficients$zero[, "Estimate"],
     tolerance = coef_tol, info = paste(desc, "summary zero estimates")
   )
   expect_equal(
-    fast_summary$zero$coefficients[, "Std. Error"],
-    pscl_summary$zero$coefficients[, "Std. Error"],
+    fast_summary$coefficients$zero[, "Std. Error"],
+    pscl_summary$coefficients$zero[, "Std. Error"],
     tolerance = se_tol, info = paste(desc, "summary zero SEs")
   )
   expect_equal(fast_summary$loglik, pscl_summary$loglik,
     tolerance = 1e-3, info = paste(desc, "summary loglik")
   )
-  expect_equal(fast_summary$aic, pscl_summary$aic,
-    tolerance = 1e-3, info = paste(desc, "summary AIC")
+  expect_equal(AIC(fast_model), AIC(pscl_model),
+    tolerance = 1e-3, info = paste(desc, "AIC")
   )
 }
 
@@ -205,23 +205,23 @@ test_that("fasthurdle with offset and different count/zero formulas matches pscl
   pscl_summary <- summary(pscl_model)
 
   expect_equal(
-    fast_summary$count$coefficients[, "Estimate"],
-    pscl_summary$count$coefficients[, "Estimate"],
+    fast_summary$coefficients$count[, "Estimate"],
+    pscl_summary$coefficients$count[, "Estimate"],
     tolerance = 1e-3
   )
   expect_equal(
-    fast_summary$count$coefficients[, "Std. Error"],
-    pscl_summary$count$coefficients[, "Std. Error"],
+    fast_summary$coefficients$count[, "Std. Error"],
+    pscl_summary$coefficients$count[, "Std. Error"],
     tolerance = 1e-2
   )
   expect_equal(
-    fast_summary$zero$coefficients[, "Estimate"],
-    pscl_summary$zero$coefficients[, "Estimate"],
+    fast_summary$coefficients$zero[, "Estimate"],
+    pscl_summary$coefficients$zero[, "Estimate"],
     tolerance = 1e-3
   )
   expect_equal(
-    fast_summary$zero$coefficients[, "Std. Error"],
-    pscl_summary$zero$coefficients[, "Std. Error"],
+    fast_summary$coefficients$zero[, "Std. Error"],
+    pscl_summary$coefficients$zero[, "Std. Error"],
     tolerance = 1e-2
   )
 

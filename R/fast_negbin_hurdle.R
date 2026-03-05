@@ -68,15 +68,16 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, m
   start <- list(
     count = model_count$coefficients,
     zero = model_zero$coefficients,
-    theta = c(count = 1, zero = 1)
+    theta = c(count = 1)
   )
 
   # Set up control parameters
+  reltol <- .Machine$double.eps^(1 / 1.6)
   control <- list(
     method = method,
     maxit = maxit,
     fnscale = -1,
-    reltol = .Machine$double.eps^(1 / 1.6),
+    reltol = reltol,
     hessian = TRUE
   )
 
@@ -86,7 +87,7 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, m
     fit_count <- optim_count_negbin_cpp(
       start = c(start$count, log(start$theta["count"])),
       Y = y, X = X, offsetx = offsetx, weights = weights,
-      method = method, hessian = TRUE
+      method = method, hessian = TRUE, maxit = maxit, reltol = reltol
     )
 
     # Estimate zero component
@@ -94,7 +95,7 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, m
       start = c(start$zero),
       Y = y, X = Z, offsetx = offsetz, weights = weights,
       link = linkstr,
-      method = method, hessian = TRUE
+      method = method, hessian = TRUE, maxit = maxit, reltol = reltol
     )
 
     # Convert to compatible format
@@ -165,7 +166,7 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, m
       Y = y, X = X, offsetx = offsetx, Z = Z, offsetz = offsetz, weights = weights,
       dist = dist, zero_dist = zero.dist,
       link = linkstr,
-      method = method, hessian = TRUE
+      method = method, hessian = TRUE, maxit = maxit, reltol = reltol
     )
 
     # Convert to compatible format

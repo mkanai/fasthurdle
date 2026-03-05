@@ -19,7 +19,9 @@ estimate_separate_components(
   hessian,
   control,
   kx,
-  kz
+  kz,
+  maxit,
+  reltol
 )
 }
 \arguments{
