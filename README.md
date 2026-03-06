@@ -96,9 +96,10 @@ df <- data.frame(
 )
 
 # Fit hurdle model with negative binomial count model and binomial zero hurdle
+# Use log_total_counts as offset in count model (modeling rates) and covariate in zero model
 # Note: You can also use other distributions as needed (dist: "poisson", "geometric"; zero.dist: "poisson", "negbin", "geometric")
 model <- fasthurdle(
-  gene_expr ~ peak_acc + log_total_counts + pct_counts_mito,
+  gene_expr ~ peak_acc + pct_counts_mito + offset(log_total_counts) | peak_acc + log_total_counts + pct_counts_mito,
   data = df,
   dist = "negbin",
   zero.dist = "binomial"
@@ -117,7 +118,7 @@ se_zero <- peak_coef_zero[2]      # Standard error
 z_zero <- peak_coef_zero[3]       # Z-statistic
 p_zero <- peak_coef_zero[4]       # P-value
 
-beta_count <- peak_coef_count[1]  # Coefficient (change in log gene expression counts per unit increase in peak accessibility)
+beta_count <- peak_coef_count[1]  # Coefficient (change in log gene expression rate per unit increase in peak accessibility)
 se_count <- peak_coef_count[2]    # Standard error
 z_count <- peak_coef_count[3]     # Z-statistic
 p_count <- peak_coef_count[4]     # P-value
@@ -134,13 +135,17 @@ For large-scale peak-gene pair testing, use `fast_negbin_hurdle`, which provides
 ```r
 library(fasthurdle)
 
-# Prepare model matrix and response
-# Note: Include intercept and all covariates in the design
-X <- model.matrix(~ peak_acc + log_total_counts + pct_counts_mito, data = df)
+# Prepare model matrices and response
+# Count model: peak_acc + covariates, with log_total_counts as offset
+X <- model.matrix(~ peak_acc + pct_counts_mito, data = df)
 y <- df$gene_expr
+offsetx <- df$log_total_counts
+
+# Zero model: peak_acc + covariates, with log_total_counts as a free covariate
+Z <- model.matrix(~ peak_acc + log_total_counts + pct_counts_mito, data = df)
 
 # Fit the model (same result extraction as fasthurdle above)
-model <- fast_negbin_hurdle(X, y)
+model <- fast_negbin_hurdle(X, y, Z = Z, offsetx = offsetx)
 ```
 
 ## Benchmark Results
@@ -180,14 +185,17 @@ The use of hurdle models for peak-gene link analysis in single-nucleus multiome 
 
 ## Changelog
 
-### v1.1 (2026-03-05)
+### v1.1.0 (2026-03-05)
 
-- **Bug fix**: Fixed missing `theta*log(theta)` term in the negative binomial count model log-likelihood (`CountNegBinFunctor`). This caused incorrect theta and coefficient estimates for all negbin count models. The analytical gradient was correct, but the inconsistency with the function value caused BFGS line search failures.
-- **Bug fix**: Fixed `maxit` and `reltol` from `hurdle.control()` not being forwarded to the C++ optimizer. The roptim library defaulted to `maxit=100` instead of the intended `10000`, causing premature convergence.
-- **New feature**: Added `Z` parameter to `fast_negbin_hurdle()` for specifying a separate design matrix for the zero component. This enables use cases like scRNA-seq depth correction, where `log(library_size)` is an offset in the count model but a covariate in the zero model.
-- **New feature**: Added `offsetx` and `offsetz` parameters to `fast_negbin_hurdle()` for specifying offsets in the count and zero components.
+- **Bug fix**: Fixed multiple convergence issues in the negative binomial count model:
+  - Fixed missing `theta*log(theta)` term in the count model log-likelihood (`CountNegBinFunctor`). The analytical gradient was correct, but the inconsistency with the function value caused BFGS line search failures and incorrect theta/coefficient estimates.
+  - Fixed `maxit` and `reltol` from `hurdle.control()` not being forwarded to the C++ optimizer. The roptim library defaulted to `maxit=100` instead of the intended `10000`, causing premature convergence.
+  - Fit count model starting values on `y > 0` subset only. The count component models a zero-truncated distribution, but starting values were previously computed from a Poisson GLM on the full dataset including zeros. Fitting on expressing cells provides starting values closer to the truncated MLE, reducing optimizer iterations by 40–75% at high zero fractions and avoiding degenerate local optima at >95% zeros.
+- **New feature**: Extended `fast_negbin_hurdle()` to support flexible model specification:
+  - Added `Z` parameter for specifying a separate design matrix for the zero component. This enables use cases like scRNA-seq depth correction, where `log(library_size)` is an offset in the count model but a covariate in the zero model.
+  - Added `offsetx` and `offsetz` parameters for specifying offsets in the count and zero components.
 
-### v1.0 (2025-07-28)
+### v1.0.0 (2025-07-28)
 
 - Initial release.
 
