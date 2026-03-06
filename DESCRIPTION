@@ -1,28 +1,25 @@
 Package: fasthurdle
 Type: Package
 Title: Fast Implementation of Hurdle Models
-Version: 1.1
+Version: 1.1.0
 Date: 2026-03-05
-Author: Masahiro Kanai
-Maintainer: Masahiro Kanai <mkanai@broadinstitute.org>
-Description: A fast implementation of hurdle models using Rcpp. This package
-    provides the same functionality as the hurdle function in the pscl package,
-    but with improved performance through C++ implementations of key functions.
+Authors@R: person("Masahiro", "Kanai", email = "mkanai@broadinstitute.org",
+    role = c("aut", "cre"))
+Description: Provides fast hurdle regression models for count data using C++
+    implementations via 'Rcpp'. Supports the same functionality as the hurdle
+    function in the 'pscl' package, with improved performance for large datasets.
 License: GPL-2
 Encoding: UTF-8
 Imports:
-  fastglm,
-  Rcpp (>= 1.0.14),
-  RcppArmadillo,
-  roptim
+  fastglm (>= 0.0.4),
+  Rcpp (>= 1.0.14)
 LinkingTo:
   Rcpp,
   RcppArmadillo,
   roptim
 Suggests:
+  car,
   testthat (>= 3.0.0),
   microbenchmark
-Remotes:
-  jaredhuling/fastglm
 Config/testthat/edition: 3
 RoxygenNote: 7.3.2
