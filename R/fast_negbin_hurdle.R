@@ -61,8 +61,11 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, m
   if (is.null(offsetz)) offsetz <- rep.int(0, n)
 
   # Generate starting values
-  # For count model
-  model_count <- fastglm::fastglm(X, y, family = poisson(), weights = weights, offset = offsetx)
+  # For count model - fit on y > 0 subset only, since the count component
+  # models a zero-truncated distribution. This provides starting values closer
+  # to the final optimum and avoids degenerate solutions at high zero fractions.
+  pos_idx <- y > 0
+  model_count <- fastglm::fastglm(X[pos_idx, , drop = FALSE], y[pos_idx], family = poisson(), weights = weights[pos_idx], offset = offsetx[pos_idx])
   # For zero model - for binomial zero model, we use binomial family with logit link
   model_zero <- suppressWarnings(fastglm::fastglm(Z, as.integer(y > 0), family = binomial(link = linkstr), weights = weights, offset = offsetz))
 

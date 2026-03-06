@@ -373,8 +373,11 @@ generate_starting_values <- function(start, Y, X, Z, offsetx, offsetz, weights,
   if (is.null(start)) {
     if (trace) cat("generating starting values...")
 
-    # Fit count model
-    model_count <- fastglm::fastglm(X, Y, family = poisson(), weights = weights, offset = offsetx)
+    # Fit count model on Y > 0 subset only, since the count component
+    # models a zero-truncated distribution. This provides starting values closer
+    # to the final optimum and avoids degenerate solutions at high zero fractions.
+    pos_idx <- Y > 0
+    model_count <- fastglm::fastglm(X[pos_idx, , drop = FALSE], Y[pos_idx], family = poisson(), weights = weights[pos_idx], offset = offsetx[pos_idx])
 
     # Fit zero model
     model_zero <- switch(zero.dist,
