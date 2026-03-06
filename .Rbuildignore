@@ -1,5 +1,8 @@
 ^.*\.Rproj$
 ^\.Rproj\.user$
 ^\.claude$
+^\.clang-format$
+^\.github$
 ^\.vscode$
+^docker$
 ^LICENSE$
