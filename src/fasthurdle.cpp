@@ -1,5 +1,6 @@
 #include <RcppArmadillo.h>
 #include <roptim.h>
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <memory>
@@ -298,6 +299,11 @@ class CountNegBinFunctor : public LikelihoodFunctor
 private:
     arma::vec lgamma_y_1_cached; // lgamma(Y_pos + 1), constant across iterations
 
+    // Unique-value lookup for Y_pos: compute expensive special functions
+    // (lgamma, digamma) only for distinct Y values, then scatter back.
+    arma::vec unique_y_vals;  // sorted unique values of Y_pos
+    arma::uvec y_index_map;   // maps each Y_pos element to its index in unique_y_vals
+
     // Cached intermediates shared between operator() and Gradient().
     // We store the parameter vector used to compute them and reuse
     // the cache only when Gradient() is called with identical parameters.
@@ -326,14 +332,25 @@ public:
     CountNegBinFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs, const arma::vec &w)
         : LikelihoodFunctor(y, x, offs, w), cached_theta(0.0), cache_valid(false)
     {
-        // Cache lgamma(Y_pos + 1) since Y_pos never changes
         if (Y1.n_elem > 0)
         {
-            lgamma_y_1_cached.set_size(Y1.n_elem);
-            for (size_t i = 0; i < Y1.n_elem; i++)
+            // Build unique-value lookup for Y_pos
+            unique_y_vals = arma::unique(Y_pos); // returns sorted
+            y_index_map.set_size(Y_pos.n_elem);
+            for (size_t i = 0; i < Y_pos.n_elem; i++)
             {
-                lgamma_y_1_cached(i) = lgamma(Y_pos(i) + 1.0);
+                // Binary search since unique_y_vals is sorted
+                auto it = std::lower_bound(unique_y_vals.begin(), unique_y_vals.end(), Y_pos(i));
+                y_index_map(i) = static_cast<arma::uword>(it - unique_y_vals.begin());
             }
+
+            // Cache lgamma(Y_pos + 1) using unique-value lookup
+            arma::vec lgamma_unique(unique_y_vals.n_elem);
+            for (size_t j = 0; j < unique_y_vals.n_elem; j++)
+            {
+                lgamma_unique(j) = lgamma(unique_y_vals(j) + 1.0);
+            }
+            lgamma_y_1_cached = lgamma_unique.elem(y_index_map);
         }
     }
 
@@ -348,12 +365,13 @@ public:
         // Compute and cache intermediates
         compute_intermediates(parms);
 
-        // lgamma(Y_pos + theta) depends on theta (changes each iteration)
-        arma::vec lgamma_y_theta(Y1.n_elem);
-        for (size_t i = 0; i < Y1.n_elem; i++)
+        // Compute lgamma(Y + theta) only for unique Y values, then scatter
+        arma::vec lgamma_unique(unique_y_vals.n_elem);
+        for (size_t j = 0; j < unique_y_vals.n_elem; j++)
         {
-            lgamma_y_theta(i) = lgamma(Y_pos(i) + cached_theta);
+            lgamma_unique(j) = lgamma(unique_y_vals(j) + cached_theta);
         }
+        arma::vec lgamma_y_theta = lgamma_unique.elem(y_index_map);
 
         // Vectorized negative binomial log probability
         arma::vec loglik1 = lgamma_y_theta - lgamma(cached_theta) - lgamma_y_1_cached +
@@ -402,12 +420,13 @@ public:
         // Single matrix multiplication instead of loop
         arma::vec grad_beta = X_pos.t() * (w_pos % grad_term);
 
-        // Vectorized digamma for Y_pos + theta
-        arma::vec digamma_y_theta(Y1.n_elem);
-        for (size_t i = 0; i < Y1.n_elem; i++)
+        // Compute digamma(Y + theta) only for unique Y values, then scatter
+        arma::vec digamma_unique(unique_y_vals.n_elem);
+        for (size_t j = 0; j < unique_y_vals.n_elem; j++)
         {
-            digamma_y_theta(i) = R::digamma(Y_pos(i) + theta);
+            digamma_unique(j) = R::digamma(unique_y_vals(j) + theta);
         }
+        arma::vec digamma_y_theta = digamma_unique.elem(y_index_map);
 
         double digamma_theta = R::digamma(theta);
 
