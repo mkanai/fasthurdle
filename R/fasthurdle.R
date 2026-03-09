@@ -1001,8 +1001,9 @@ model.matrix.fasthurdle <- function(object, model = c("count", "zero"), ...) {
 #'
 #' @export
 predict.fasthurdle <- function(
-    object, newdata, type = c("response", "prob", "count", "zero"),
-    na.action = na.pass, at = NULL, ...) {
+  object, newdata, type = c("response", "prob", "count", "zero"),
+  na.action = na.pass, at = NULL, ...
+) {
   type <- match.arg(type)
 
   ## if no new data supplied

@@ -4,7 +4,12 @@
 \alias{acat_stagewise}
 \title{ACAT stage-wise testing for hurdle model FDR control}
 \usage{
-acat_stagewise(p_zero, p_count, alpha = 0.05)
+acat_stagewise(
+  p_zero,
+  p_count,
+  alpha = 0.05,
+  pi0.method = c("smoother", "bootstrap")
+)
 }
 \arguments{
 \item{p_zero}{Numeric vector of zero-inflation model p-values.}
@@ -13,6 +18,10 @@ acat_stagewise(p_zero, p_count, alpha = 0.05)
 
 \item{alpha}{Significance threshold for both screening and confirmation
 (default: 0.05).}
+
+\item{pi0.method}{Method for estimating the proportion of true nulls in
+\code{\link[qvalue]{qvalue}}. Either \code{"smoother"} (default) or
+\code{"bootstrap"}.}
 }
 \value{
 A data.frame with columns:

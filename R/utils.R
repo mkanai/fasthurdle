@@ -129,6 +129,9 @@ jiang_doerge_fdr <- function(p_stage1, p_stage2, alpha1 = 0.1, alpha2 = 0.05) {
 #' @param p_count Numeric vector of count model p-values.
 #' @param alpha Significance threshold for both screening and confirmation
 #'   (default: 0.05).
+#' @param pi0.method Method for estimating the proportion of true nulls in
+#'   \code{\link[qvalue]{qvalue}}. Either \code{"smoother"} (default) or
+#'   \code{"bootstrap"}.
 #' @return A data.frame with columns:
 #'   \item{p_omnibus}{CCT-combined omnibus p-value.}
 #'   \item{q_omnibus}{qvalue-based FDR for the omnibus test.}
@@ -153,7 +156,9 @@ jiang_doerge_fdr <- function(p_stage1, p_stage2, alpha1 = 0.1, alpha2 = 0.05) {
 #' genome-wide experiments. \emph{Proceedings of the National Academy of
 #' Sciences}, 100, 9440-9445.
 #' @export
-acat_stagewise <- function(p_zero, p_count, alpha = 0.05) {
+acat_stagewise <- function(p_zero, p_count, alpha = 0.05,
+                           pi0.method = c("smoother", "bootstrap")) {
+  pi0.method <- match.arg(pi0.method)
   n <- length(p_zero)
   if (length(p_count) != n) stop("'p_zero' and 'p_count' must have the same length")
   if (!requireNamespace("qvalue", quietly = TRUE)) {
@@ -169,7 +174,7 @@ acat_stagewise <- function(p_zero, p_count, alpha = 0.05) {
   q_omnibus <- rep(NA_real_, n)
   ok <- !is.na(p_omnibus)
   if (sum(ok) > 1) {
-    q_omnibus[ok] <- qvalue::qvalue(p_omnibus[ok], pi0.method = "bootstrap")$qvalues
+    q_omnibus[ok] <- qvalue::qvalue(p_omnibus[ok], pi0.method = pi0.method)$qvalues
   }
 
   selected <- !is.na(q_omnibus) & q_omnibus < alpha
