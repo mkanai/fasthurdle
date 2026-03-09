@@ -23,10 +23,14 @@ CCT <- function(pvals, weights = NULL) {
   if (any(is.na(pvals))) stop("NAs not allowed in 'pvals'")
   if (any(pvals < 0) || any(pvals > 1)) stop("all 'pvals' must be between 0 and 1")
 
-  if (any(pvals == 0)) return(0)
+  if (any(pvals == 0)) {
+    return(0)
+  }
   # When any p-value is exactly 1, the Cauchy statistic is undefined.
   # STAAR returns 1; SAIGE-QTL instead returns Bonferroni min(1, min(p)*n).
-  if (any(pvals == 1)) return(min(1, min(pvals) * length(pvals)))
+  if (any(pvals == 1)) {
+    return(min(1, min(pvals) * length(pvals)))
+  }
 
   # Default: equal weights; otherwise validate and standardize
   if (is.null(weights)) {
