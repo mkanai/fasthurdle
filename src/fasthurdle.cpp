@@ -412,17 +412,18 @@ class CountNegBinFunctor : public LikelihoodFunctor {
 
 // Per-observation FIM components for zero-truncated NB.
 struct ZtnbFimResult {
-  arma::vec v_ee;    // E[s_eta^2] per observation (weighted)
-  arma::vec v_et;    // E[s_eta * s_logtheta] per observation (weighted)
-  double v_tt_sum;   // sum_i w_i * E[s_logtheta^2]
+  arma::vec v_ee;   // E[s_eta^2] per observation (weighted)
+  arma::vec v_et;   // E[s_eta * s_logtheta] per observation (weighted)
+  double v_tt_sum;  // sum_i w_i * E[s_logtheta^2]
 };
 
 // Compute expected Fisher information components for zero-truncated NB model.
 // Uses PMF recurrence (no lgamma in inner loop). Cost: O(n_pos * avg_y_max).
-ZtnbFimResult compute_ztnb_fim_components(
-    const arma::vec &beta, double theta, const arma::mat &X_pos,
-    const arma::vec &offset_pos, const arma::vec &w_pos,
-    double quantile_cutoff = 0.9999) {
+ZtnbFimResult compute_ztnb_fim_components(const arma::vec &beta, double theta,
+                                          const arma::mat &X_pos,
+                                          const arma::vec &offset_pos,
+                                          const arma::vec &w_pos,
+                                          double quantile_cutoff = 0.9999) {
   int n_pos = X_pos.n_rows;
   double log_theta = std::log(theta);
   double digamma_theta = R::digamma(theta);
@@ -454,8 +455,7 @@ ZtnbFimResult compute_ztnb_fim_components(
     double log_ratio = log_theta - std::log(mu_theta);
     double c_trunc_logtheta = r * (log_ratio + 1.0 - theta_over_mutheta);
 
-    double pmf =
-        std::exp(R::dnbinom_mu(1.0, theta, mu, 1) - std::log(p1));
+    double pmf = std::exp(R::dnbinom_mu(1.0, theta, mu, 1) - std::log(p1));
     double digamma_y_theta = R::digamma(1.0 + theta);
     double pmf_ratio = mu_over_mutheta;
 
@@ -469,8 +469,7 @@ ZtnbFimResult compute_ztnb_fim_components(
       if (pmf < 1e-300) continue;
 
       double y_d = static_cast<double>(y);
-      double s_eta =
-          y_d - mu * (y_d + theta) / mu_theta - c_trunc_eta;
+      double s_eta = y_d - mu * (y_d + theta) / mu_theta - c_trunc_eta;
       double s_logtheta =
           theta * (digamma_y_theta - digamma_theta + log_ratio + 1.0 -
                    (y_d + theta) / mu_theta + c_trunc_logtheta);
@@ -507,21 +506,21 @@ arma::mat assemble_fim(const ZtnbFimResult &comp, const arma::mat &X_pos) {
 
 // Convenience wrapper: returns the assembled FIM directly.
 arma::mat compute_ztnb_fisher_info(const arma::vec &beta, double theta,
-                                    const arma::mat &X_pos,
-                                    const arma::vec &offset_pos,
-                                    const arma::vec &w_pos,
-                                    double quantile_cutoff = 0.9999) {
-  auto comp = compute_ztnb_fim_components(beta, theta, X_pos, offset_pos,
-                                           w_pos, quantile_cutoff);
+                                   const arma::mat &X_pos,
+                                   const arma::vec &offset_pos,
+                                   const arma::vec &w_pos,
+                                   double quantile_cutoff = 0.9999) {
+  auto comp = compute_ztnb_fim_components(beta, theta, X_pos, offset_pos, w_pos,
+                                          quantile_cutoff);
   return assemble_fim(comp, X_pos);
 }
 
 // R-exported test wrapper. Takes full data; filters to Y>0 internally.
 // [[Rcpp::export]]
 arma::mat compute_ztnb_fisher_info_cpp(const arma::vec &beta, double theta,
-                                        const arma::mat &X,
-                                        const arma::vec &offsetx,
-                                        const arma::vec &weights) {
+                                       const arma::mat &X,
+                                       const arma::vec &offsetx,
+                                       const arma::vec &weights) {
   // Filter to positive observations (FIM is only over Y>0)
   // For the test export, we assume all rows are Y>0 (caller pre-filters)
   return compute_ztnb_fisher_info(beta, theta, X, offsetx, weights);
@@ -1129,20 +1128,22 @@ struct ZtnbCgfResult {
 // uses the NB MGF in closed form — no PMF summation needed.
 struct ZtnbCgfObsCache {
   double mu;
-  double alpha;      // theta / (mu + theta)
-  double C_i;        // alpha * mu * (1 + r), where r = p0/(1-p0)
-  double p0;         // (theta/(mu+theta))^theta
-  double log_p1;     // log(1 - p0)
-  double gi;         // covariate-projected test variable
-  double wi;         // weight
+  double alpha;       // theta / (mu + theta)
+  double C_i;         // alpha * mu * (1 + r), where r = p0/(1-p0)
+  double p0;          // (theta/(mu+theta))^theta
+  double log_p1;      // log(1 - p0)
+  double gi;          // covariate-projected test variable
+  double wi;          // weight
   double lambda_max;  // log(1 + theta/mu) = MGF domain bound
 };
 
 // Build per-observation cache for closed-form CGF.
-std::vector<ZtnbCgfObsCache> build_cgf_cache(
-    const arma::vec &beta, double theta, const arma::mat &X_pos,
-    const arma::vec &offset_pos, const arma::vec &w_pos,
-    const arma::vec &g_tilde_pos) {
+std::vector<ZtnbCgfObsCache> build_cgf_cache(const arma::vec &beta,
+                                             double theta,
+                                             const arma::mat &X_pos,
+                                             const arma::vec &offset_pos,
+                                             const arma::vec &w_pos,
+                                             const arma::vec &g_tilde_pos) {
   int n_pos = X_pos.n_rows;
   double log_theta = std::log(theta);
   std::vector<ZtnbCgfObsCache> cache;
@@ -1269,9 +1270,9 @@ struct SaddlepointResult {
   bool converged;
 };
 
-SaddlepointResult find_saddlepoint(
-    double q, double theta, const std::vector<ZtnbCgfObsCache> &cache,
-    double tol = 1e-8, int maxiter = 100) {
+SaddlepointResult find_saddlepoint(double q, double theta,
+                                   const std::vector<ZtnbCgfObsCache> &cache,
+                                   double tol = 1e-8, int maxiter = 100) {
   SaddlepointResult res = {0.0, false};
   double t = 0.0;
 
@@ -1318,9 +1319,8 @@ SaddlepointResult find_saddlepoint(
 }
 
 // Compute SPA p-value using Lugannani-Rice formula (one-sided tail prob)
-double spa_pvalue_one_tail(
-    double zeta, double q, double theta,
-    const std::vector<ZtnbCgfObsCache> &cache) {
+double spa_pvalue_one_tail(double zeta, double q, double theta,
+                           const std::vector<ZtnbCgfObsCache> &cache) {
   auto cgf = compute_ztnb_cgf_cached(zeta, theta, cache);
 
   double temp1 = zeta * q - cgf.K;
@@ -1367,11 +1367,13 @@ double spa_pvalue_twosided(double q, double pval_nospa, double theta,
 // ==========================================================================
 
 // [[Rcpp::export]]
-Rcpp::List score_test_count_cpp(
-    const arma::vec &null_par, const arma::vec &Y, const arma::mat &X_null,
-    const arma::mat &X_full, const arma::vec &offsetx,
-    const arma::vec &weights, const std::string &dist = "negbin",
-    bool use_spa = false, double spa_cutoff = 2.0) {
+Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
+                                const arma::mat &X_null,
+                                const arma::mat &X_full,
+                                const arma::vec &offsetx,
+                                const arma::vec &weights,
+                                const std::string &dist = "negbin",
+                                bool use_spa = false, double spa_cutoff = 2.0) {
   int kx_null = X_null.n_cols;
   int kx_full = X_full.n_cols;
   int n_test = kx_full - kx_null;
@@ -1412,8 +1414,7 @@ Rcpp::List score_test_count_cpp(
     return Rcpp::List::create(
         Rcpp::Named("beta") = arma::vec(n_test, arma::fill::zeros),
         Rcpp::Named("se") = arma::vec(n_test, arma::fill::value(R_PosInf)),
-        Rcpp::Named("statistic") = 0.0,
-        Rcpp::Named("pvalue") = 1.0,
+        Rcpp::Named("statistic") = 0.0, Rcpp::Named("pvalue") = 1.0,
         Rcpp::Named("spa_applied") = false);
   }
 
@@ -1428,9 +1429,9 @@ Rcpp::List score_test_count_cpp(
     theta_fim = 1e8;  // Poisson ≈ NB with large theta
   }
 
-  arma::mat fim = compute_ztnb_fisher_info(
-      beta_full, theta_fim, X_full.rows(Y1), offsetx.elem(Y1),
-      weights.elem(Y1));
+  arma::mat fim =
+      compute_ztnb_fisher_info(beta_full, theta_fim, X_full.rows(Y1),
+                               offsetx.elem(Y1), weights.elem(Y1));
 
   // Extract FIM blocks for Schur complement.
   // Project out all nuisance parameters (null betas + theta for NB).
@@ -1441,9 +1442,8 @@ Rcpp::List score_test_count_cpp(
   test_idx = arma::regspace<arma::uvec>(kx_null, kx_full - 1);
   if (np_fim > kx_full) {
     // NB: null = covariate betas + theta
-    null_idx = arma::join_cols(
-        arma::regspace<arma::uvec>(0, kx_null - 1),
-        arma::regspace<arma::uvec>(kx_full, np_fim - 1));
+    null_idx = arma::join_cols(arma::regspace<arma::uvec>(0, kx_null - 1),
+                               arma::regspace<arma::uvec>(kx_full, np_fim - 1));
   } else {
     null_idx = arma::regspace<arma::uvec>(0, kx_null - 1);
   }
@@ -1482,9 +1482,9 @@ Rcpp::List score_test_count_cpp(
 
     // Build per-observation cache once, reused across all Newton iterations
     // Empty cache signals a degenerate observation — skip SPA entirely
-    auto cgf_cache = build_cgf_cache(beta_full, theta_fim, X_full.rows(Y1),
-                                      offsetx.elem(Y1), weights.elem(Y1),
-                                      g_tilde_pos);
+    auto cgf_cache =
+        build_cgf_cache(beta_full, theta_fim, X_full.rows(Y1), offsetx.elem(Y1),
+                        weights.elem(Y1), g_tilde_pos);
 
     if (!cgf_cache.empty()) {
       double p_spa =
@@ -1582,10 +1582,8 @@ Rcpp::List score_test_count_cpp(
   }
 
   return Rcpp::List::create(
-      Rcpp::Named("beta") = beta_hat,
-      Rcpp::Named("se") = se_hat,
-      Rcpp::Named("statistic") = T_stat,
-      Rcpp::Named("pvalue") = pvalue,
+      Rcpp::Named("beta") = beta_hat, Rcpp::Named("se") = se_hat,
+      Rcpp::Named("statistic") = T_stat, Rcpp::Named("pvalue") = pvalue,
       Rcpp::Named("spa_applied") = spa_applied);
 }
 
