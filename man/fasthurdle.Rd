@@ -15,6 +15,9 @@ fasthurdle(
   zero.dist = c("binomial", "poisson", "negbin", "geometric"),
   link = c("logit", "probit", "cloglog", "cauchit", "log"),
   control = hurdle.control(...),
+  score_test = NULL,
+  null_fit = NULL,
+  spa_cutoff = 2,
   model = TRUE,
   y = TRUE,
   x = FALSE,
@@ -48,6 +51,20 @@ Currently, "logit", "probit", "cloglog", "cauchit", and "log" are supported.}
 
 \item{control}{A list of control parameters passed to the optimizer. See \code{\link{hurdle.control}}.}
 
+\item{score_test}{Optional. Column name(s) of the count model variable(s) to compute
+a score test for. The score test evaluates the significance of the test variable(s)
+at the null MLE (without the test variable), giving better-calibrated p-values than
+the Wald test when the NB dispersion parameter theta is poorly identified (e.g.,
+when positive counts are approximately Poisson). Beta and SE for the test variable
+are derived from the score test ratio estimator (\code{beta = score / information}),
+which is asymptotically equivalent to the MLE. See Details.}
+
+\item{null_fit}{Optional. A pre-fitted null model from \code{\link{fit_null_count}}.
+When provided with \code{score_test}, the null model is not re-fitted. This is
+useful for testing many predictors against the same null (e.g., many peaks per gene
+in single-cell genomics). The null model can be saved with \code{saveRDS} and
+reloaded for reuse.}
+
 \item{model}{Logical. If TRUE, the model frame is included in the returned object.}
 
 \item{y}{Logical. If TRUE, the response vector is included in the returned object.}
@@ -58,6 +75,8 @@ Currently, "logit", "probit", "cloglog", "cauchit", and "log" are supported.}
 }
 \value{
 An object of class "fasthurdle" representing the fitted model.
+  When \code{score_test} is used, the \code{$score_test} slot contains the score test
+  results (beta, se, statistic, pvalue).
 }
 \description{
 Fits hurdle regression models for count data. The hurdle model combines a count data model
@@ -75,6 +94,28 @@ f_{zero}(0) & \text{if } y = 0 \\
 \end{cases}}
 
 where \eqn{f_{zero}} is the zero hurdle distribution and \eqn{f_{count}} is the count distribution.
+
+## Score test mode
+
+When \code{score_test} is specified, the full count model is still fitted (unlike
+\code{\link{fast_negbin_hurdle}} which skips the full model for speed). The score test
+results are stored in the \code{$score_test} slot alongside the standard Wald results.
+This allows comparison between the two testing approaches.
+
+The score test is available for all count distributions (negbin, poisson, geometric)
+and is especially recommended when:
+\itemize{
+  \item Using the NB count model with positive counts that are approximately Poisson
+    (theta poorly identified), which causes tail-heavy Wald p-value inflation
+    (up to 11x at alpha = 0.001).
+  \item Using the Poisson count model but the data has genuine overdispersion (e.g.,
+    from donor-level clustering), which causes severe Wald inflation (up to 4x at
+    alpha = 0.05).
+}
+
+The score test beta/SE use the ratio estimator (\code{beta = score / information},
+\code{SE = 1 / sqrt(information)}) with the Schur complement to adjust for covariates.
+This is the same approach used by SAIGE-QTL for single-cell eQTL testing.
 }
 \examples{
 \dontrun{

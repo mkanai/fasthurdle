@@ -406,6 +406,126 @@ class CountNegBinFunctor : public LikelihoodFunctor {
   }
 };
 
+// ==========================================================================
+// Expected Fisher Information for zero-truncated NB model
+// ==========================================================================
+
+// Per-observation FIM components for zero-truncated NB.
+struct ZtnbFimResult {
+  arma::vec v_ee;    // E[s_eta^2] per observation (weighted)
+  arma::vec v_et;    // E[s_eta * s_logtheta] per observation (weighted)
+  double v_tt_sum;   // sum_i w_i * E[s_logtheta^2]
+};
+
+// Compute expected Fisher information components for zero-truncated NB model.
+// Uses PMF recurrence (no lgamma in inner loop). Cost: O(n_pos * avg_y_max).
+ZtnbFimResult compute_ztnb_fim_components(
+    const arma::vec &beta, double theta, const arma::mat &X_pos,
+    const arma::vec &offset_pos, const arma::vec &w_pos,
+    double quantile_cutoff = 0.9999) {
+  int n_pos = X_pos.n_rows;
+  double log_theta = std::log(theta);
+  double digamma_theta = R::digamma(theta);
+
+  ZtnbFimResult result;
+  result.v_ee.zeros(n_pos);
+  result.v_et.zeros(n_pos);
+  result.v_tt_sum = 0.0;
+
+  for (int i = 0; i < n_pos; i++) {
+    double eta_i = arma::dot(X_pos.row(i), beta) + offset_pos(i);
+    double mu = std::exp(eta_i);
+    double mu_theta = mu + theta;
+    double mu_over_mutheta = mu / mu_theta;
+    double theta_over_mutheta = theta / mu_theta;
+
+    double log_p0 = theta * (log_theta - std::log(mu_theta));
+    double p0 = std::exp(log_p0);
+    double p1 = 1.0 - p0;
+    if (p1 < 1e-300) p1 = 1e-300;
+    double r = p0 / p1;
+
+    int y_max = static_cast<int>(
+        R::qnbinom(quantile_cutoff, theta, theta / mu_theta, 1, 0));
+    if (y_max < 1) y_max = 1;
+    if (y_max > 10000) y_max = 10000;
+
+    double c_trunc_eta = r * theta * mu_over_mutheta;
+    double log_ratio = log_theta - std::log(mu_theta);
+    double c_trunc_logtheta = r * (log_ratio + 1.0 - theta_over_mutheta);
+
+    double pmf =
+        std::exp(R::dnbinom_mu(1.0, theta, mu, 1) - std::log(p1));
+    double digamma_y_theta = R::digamma(1.0 + theta);
+    double pmf_ratio = mu_over_mutheta;
+
+    double ee_i = 0.0, et_i = 0.0, tt_i = 0.0;
+
+    for (int y = 1; y <= y_max; y++) {
+      if (y > 1) {
+        pmf *= (y - 1.0 + theta) / static_cast<double>(y) * pmf_ratio;
+        digamma_y_theta += 1.0 / (y - 1.0 + theta);
+      }
+      if (pmf < 1e-300) continue;
+
+      double y_d = static_cast<double>(y);
+      double s_eta =
+          y_d - mu * (y_d + theta) / mu_theta - c_trunc_eta;
+      double s_logtheta =
+          theta * (digamma_y_theta - digamma_theta + log_ratio + 1.0 -
+                   (y_d + theta) / mu_theta + c_trunc_logtheta);
+
+      double pmf_seta = pmf * s_eta;
+      ee_i += pmf_seta * s_eta;
+      et_i += pmf_seta * s_logtheta;
+      tt_i += pmf * s_logtheta * s_logtheta;
+    }
+
+    double wi = w_pos(i);
+    result.v_ee(i) = ee_i * wi;
+    result.v_et(i) = et_i * wi;
+    result.v_tt_sum += tt_i * wi;
+  }
+
+  return result;
+}
+
+// Assemble FIM matrix from components. Returns (kx+1) x (kx+1) matrix.
+arma::mat assemble_fim(const ZtnbFimResult &comp, const arma::mat &X_pos) {
+  int kx = X_pos.n_cols;
+  int np = kx + 1;
+  arma::mat fim(np, np, arma::fill::zeros);
+  fim.submat(0, 0, kx - 1, kx - 1) =
+      X_pos.t() * arma::diagmat(comp.v_ee) * X_pos;
+  arma::vec xt_vet = X_pos.t() * comp.v_et;
+  fim.submat(0, kx, kx - 1, kx) = xt_vet;
+  fim.submat(kx, 0, kx, kx - 1) = xt_vet.t();
+  fim(kx, kx) = comp.v_tt_sum;
+  return fim;
+}
+
+// Convenience wrapper: returns the assembled FIM directly.
+arma::mat compute_ztnb_fisher_info(const arma::vec &beta, double theta,
+                                    const arma::mat &X_pos,
+                                    const arma::vec &offset_pos,
+                                    const arma::vec &w_pos,
+                                    double quantile_cutoff = 0.9999) {
+  auto comp = compute_ztnb_fim_components(beta, theta, X_pos, offset_pos,
+                                           w_pos, quantile_cutoff);
+  return assemble_fim(comp, X_pos);
+}
+
+// R-exported test wrapper. Takes full data; filters to Y>0 internally.
+// [[Rcpp::export]]
+arma::mat compute_ztnb_fisher_info_cpp(const arma::vec &beta, double theta,
+                                        const arma::mat &X,
+                                        const arma::vec &offsetx,
+                                        const arma::vec &weights) {
+  // Filter to positive observations (FIM is only over Y>0)
+  // For the test export, we assume all rows are Y>0 (caller pre-filters)
+  return compute_ztnb_fisher_info(beta, theta, X, offsetx, weights);
+}
+
 // Count model Geometric functor (special case of Negative Binomial with theta =
 // 1)
 class CountGeomFunctor : public LikelihoodFunctor {
@@ -859,10 +979,7 @@ Rcpp::List optim_count_negbin_cpp(const arma::vec &start, const arma::vec &Y,
                                   const std::string &method = "BFGS",
                                   bool hessian = true, int maxit = 10000,
                                   double reltol = -1.0) {
-  // Create functor
   CountNegBinFunctor functor(Y, X, offsetx, weights);
-
-  // Run optimization
   arma::vec par = start;
   return run_optimization(functor, par, method, hessian, maxit, reltol);
 }
@@ -993,6 +1110,357 @@ Rcpp::List optim_joint_cpp(
   // Run optimization
   arma::vec par = start;
   return run_optimization(functor, par, method, hessian, maxit, reltol);
+}
+
+// ==========================================================================
+// Saddlepoint approximation (SPA) for score test p-values
+// ==========================================================================
+
+// CGF result: K(t), K'(t), K''(t) for the adjusted score Σ s_eta_i * g_i
+struct ZtnbCgfResult {
+  double K;   // CGF value
+  double K1;  // First derivative
+  double K2;  // Second derivative
+};
+
+// Evaluate CGF of the ZTNB score test statistic at a given t.
+// g_tilde_pos: covariate-projected test variable for Y>0 observations.
+ZtnbCgfResult compute_ztnb_cgf(
+    double t, const arma::vec &beta, double theta,
+    const arma::mat &X_pos, const arma::vec &offset_pos,
+    const arma::vec &w_pos, const arma::vec &g_tilde_pos,
+    double quantile_cutoff = 0.9999) {
+  int n_pos = X_pos.n_rows;
+  double log_theta = std::log(theta);
+  ZtnbCgfResult result = {0.0, 0.0, 0.0};
+
+  for (int i = 0; i < n_pos; i++) {
+    double gi = g_tilde_pos(i);
+    double wi = w_pos(i);
+    if (std::abs(gi) < 1e-15) continue;  // skip zero-contribution obs
+
+    double eta_i = arma::dot(X_pos.row(i), beta) + offset_pos(i);
+    double mu = std::exp(eta_i);
+    double mu_theta = mu + theta;
+    double mu_over_mutheta = mu / mu_theta;
+
+    double log_p0 = theta * (log_theta - std::log(mu_theta));
+    double p0 = std::exp(log_p0);
+    double p1 = 1.0 - p0;
+    if (p1 < 1e-300) p1 = 1e-300;
+    double r = p0 / p1;
+    double c_trunc_eta = r * theta * mu_over_mutheta;
+
+    int y_max = static_cast<int>(
+        R::qnbinom(quantile_cutoff, theta, theta / mu_theta, 1, 0));
+    if (y_max < 1) y_max = 1;
+    if (y_max > 10000) y_max = 10000;
+
+    double pmf =
+        std::exp(R::dnbinom_mu(1.0, theta, mu, 1) - std::log(p1));
+    double pmf_ratio = mu_over_mutheta;
+
+    // Accumulate: sum_exp = Σ pmf * exp(t*s*g), etc.
+    double sum_exp = 0.0, sum_exp_sg = 0.0, sum_exp_sg2 = 0.0;
+
+    for (int y = 1; y <= y_max; y++) {
+      if (y > 1) {
+        pmf *= (y - 1.0 + theta) / static_cast<double>(y) * pmf_ratio;
+      }
+      if (pmf < 1e-300) continue;
+
+      double y_d = static_cast<double>(y);
+      double s_eta = y_d - mu * (y_d + theta) / mu_theta - c_trunc_eta;
+      double sg = s_eta * gi;
+      double exp_tsg = std::exp(t * sg);
+
+      double pmf_exp = pmf * exp_tsg;
+      sum_exp += pmf_exp;
+      sum_exp_sg += pmf_exp * sg;
+      sum_exp_sg2 += pmf_exp * sg * sg;
+    }
+
+    if (sum_exp > 1e-300) {
+      result.K += wi * std::log(sum_exp);
+      double ratio1 = sum_exp_sg / sum_exp;
+      result.K1 += wi * ratio1;
+      result.K2 += wi * (sum_exp_sg2 / sum_exp - ratio1 * ratio1);
+    }
+  }
+
+  return result;
+}
+
+// Find saddlepoint: solve K'(zeta) = q using Newton's method with bisection
+// fallback. Returns zeta and convergence status.
+struct SaddlepointResult {
+  double zeta;
+  bool converged;
+};
+
+SaddlepointResult find_saddlepoint(
+    double q, const arma::vec &beta, double theta,
+    const arma::mat &X_pos, const arma::vec &offset_pos,
+    const arma::vec &w_pos, const arma::vec &g_tilde_pos,
+    double tol = 1e-8, int maxiter = 100,
+    double quantile_cutoff = 0.9999) {
+  SaddlepointResult res = {0.0, false};
+  double t = 0.0;
+
+  // Initial CGF at t=0 (reused in first iteration for K2)
+  auto cgf = compute_ztnb_cgf(t, beta, theta, X_pos, offset_pos, w_pos,
+                                g_tilde_pos, quantile_cutoff);
+  double K1_eval = cgf.K1 - q;
+  double K2_eval = cgf.K2;
+  double prev_jump = std::numeric_limits<double>::infinity();
+
+  for (int iter = 0; iter < maxiter; iter++) {
+    if (K2_eval < 1e-20) K2_eval = 1e-20;
+    double tnew = t - K1_eval / K2_eval;
+
+    if (std::abs(tnew - t) < tol) {
+      res.zeta = tnew;
+      res.converged = true;
+      return res;
+    }
+
+    // Evaluate CGF at Newton step
+    cgf = compute_ztnb_cgf(tnew, beta, theta, X_pos, offset_pos, w_pos,
+                            g_tilde_pos, quantile_cutoff);
+    double new_K1 = cgf.K1 - q;
+
+    if (std::isnan(tnew) || std::isnan(new_K1)) break;
+
+    // Bisection safeguard (from SAIGE)
+    if ((K1_eval > 0) != (new_K1 > 0)) {
+      if (std::abs(tnew - t) > (prev_jump - tol)) {
+        tnew = t + ((new_K1 > K1_eval) ? 1.0 : -1.0) * prev_jump / 2.0;
+        cgf = compute_ztnb_cgf(tnew, beta, theta, X_pos, offset_pos, w_pos,
+                                g_tilde_pos, quantile_cutoff);
+        new_K1 = cgf.K1 - q;
+        prev_jump = prev_jump / 2.0;
+      } else {
+        prev_jump = std::abs(tnew - t);
+      }
+    }
+
+    t = tnew;
+    K1_eval = new_K1;
+    K2_eval = cgf.K2;  // reuse for next iteration
+  }
+
+  res.zeta = t;
+  res.converged = false;
+  return res;
+}
+
+// Compute SPA p-value using Lugannani-Rice formula (one-sided tail prob)
+double spa_pvalue_one_tail(
+    double zeta, double q, const arma::vec &beta, double theta,
+    const arma::mat &X_pos, const arma::vec &offset_pos,
+    const arma::vec &w_pos, const arma::vec &g_tilde_pos,
+    double quantile_cutoff = 0.9999) {
+  auto cgf = compute_ztnb_cgf(zeta, beta, theta, X_pos, offset_pos, w_pos,
+                                g_tilde_pos, quantile_cutoff);
+
+  double temp1 = zeta * q - cgf.K;
+  if (!std::isfinite(cgf.K) || !std::isfinite(cgf.K2) || temp1 < 0 ||
+      cgf.K2 < 0) {
+    return -1.0;  // signal failure
+  }
+
+  double w = (zeta > 0 ? 1.0 : -1.0) * std::sqrt(2.0 * temp1);
+  double v = zeta * std::sqrt(cgf.K2);
+
+  if (std::abs(w) < 1e-15) return -1.0;
+
+  double z_spa = w + (1.0 / w) * std::log(v / w);
+  if (std::isnan(z_spa)) return -1.0;
+
+  if (z_spa > 0) {
+    return R::pnorm(z_spa, 0.0, 1.0, 0, 0);  // upper tail
+  } else {
+    return R::pnorm(z_spa, 0.0, 1.0, 1, 0);  // lower tail
+  }
+}
+
+// Full two-sided SPA p-value. Falls back to pval_nospa on failure.
+double spa_pvalue_twosided(
+    double q, double pval_nospa, const arma::vec &beta, double theta,
+    const arma::mat &X_pos, const arma::vec &offset_pos,
+    const arma::vec &w_pos, const arma::vec &g_tilde_pos,
+    double tol = 1e-8, double quantile_cutoff = 0.9999) {
+  // Solve for q and -q (two-sided)
+  auto sp1 = find_saddlepoint(q, beta, theta, X_pos, offset_pos, w_pos,
+                                g_tilde_pos, tol, 100, quantile_cutoff);
+  auto sp2 = find_saddlepoint(-q, beta, theta, X_pos, offset_pos, w_pos,
+                                g_tilde_pos, tol, 100, quantile_cutoff);
+
+  if (!sp1.converged || !sp2.converged) return pval_nospa;
+
+  double p1 = spa_pvalue_one_tail(sp1.zeta, q, beta, theta, X_pos,
+                                    offset_pos, w_pos, g_tilde_pos,
+                                    quantile_cutoff);
+  double p2 = spa_pvalue_one_tail(sp2.zeta, -q, beta, theta, X_pos,
+                                    offset_pos, w_pos, g_tilde_pos,
+                                    quantile_cutoff);
+
+  if (p1 < 0 || p2 < 0) return pval_nospa;
+
+  return std::abs(p1) + std::abs(p2);
+}
+
+// ==========================================================================
+// Score test for count component
+// ==========================================================================
+
+// [[Rcpp::export]]
+Rcpp::List score_test_count_cpp(
+    const arma::vec &null_par, const arma::vec &Y, const arma::mat &X_null,
+    const arma::mat &X_full, const arma::vec &offsetx,
+    const arma::vec &weights, const std::string &dist = "negbin",
+    bool use_spa = false, double spa_cutoff = 2.0) {
+  int kx_null = X_null.n_cols;
+  int kx_full = X_full.n_cols;
+  int n_test = kx_full - kx_null;
+
+  // Build full-model parameter vector at the null MLE:
+  // Insert 0 for the test variable(s) at position kx_null
+  arma::vec parms_full;
+  if (dist == "negbin") {
+    parms_full.zeros(kx_full + 1);
+    parms_full.subvec(0, kx_null - 1) = null_par.subvec(0, kx_null - 1);
+    parms_full(kx_full) = null_par(kx_null);  // logtheta
+  } else {
+    parms_full.zeros(kx_full);
+    parms_full.subvec(0, kx_null - 1) = null_par;
+  }
+
+  // Evaluate gradient at the null (using full model design matrix)
+  // Functors return gradient of -loglik, so score = -grad
+  arma::vec grad;
+  if (dist == "negbin") {
+    CountNegBinFunctor functor(Y, X_full, offsetx, weights);
+    functor.Gradient(parms_full, grad);
+  } else if (dist == "poisson") {
+    CountPoissonFunctor functor(Y, X_full, offsetx, weights);
+    functor.Gradient(parms_full, grad);
+  } else if (dist == "geometric") {
+    CountGeomFunctor functor(Y, X_full, offsetx, weights);
+    functor.Gradient(parms_full, grad);
+  } else {
+    Rcpp::stop("Unsupported dist: " + dist);
+  }
+
+  arma::vec U_test = -grad.subvec(kx_null, kx_full - 1);
+
+  // Compute expected FIM at the null for the full model
+  arma::uvec Y1 = arma::find(Y > 0);
+  if (Y1.n_elem == 0) {
+    return Rcpp::List::create(
+        Rcpp::Named("beta") = arma::vec(n_test, arma::fill::zeros),
+        Rcpp::Named("se") = arma::vec(n_test, arma::fill::value(R_PosInf)),
+        Rcpp::Named("statistic") = 0.0,
+        Rcpp::Named("pvalue") = 1.0,
+        Rcpp::Named("spa_applied") = false);
+  }
+
+  // Determine theta for FIM computation
+  double theta_fim;
+  arma::vec beta_full = parms_full.subvec(0, kx_full - 1);
+  if (dist == "negbin") {
+    theta_fim = std::exp(parms_full(kx_full));
+  } else if (dist == "geometric") {
+    theta_fim = 1.0;
+  } else {
+    theta_fim = 1e8;  // Poisson ≈ NB with large theta
+  }
+
+  arma::mat fim = compute_ztnb_fisher_info(
+      beta_full, theta_fim, X_full.rows(Y1), offsetx.elem(Y1),
+      weights.elem(Y1));
+
+  // Extract FIM blocks for Schur complement.
+  // Project out all nuisance parameters (null betas + theta for NB).
+  // I_test_eff = I_tt - I_tn * I_nn^{-1} * I_nt
+  int np_fim = fim.n_rows;  // kx_full+1 for NB, kx_full for Poisson/Geom
+  // Nuisance indices: 0..kx_null-1 and kx_full..np_fim-1 (theta if NB)
+  arma::uvec null_idx, test_idx;
+  test_idx = arma::regspace<arma::uvec>(kx_null, kx_full - 1);
+  if (np_fim > kx_full) {
+    // NB: null = covariate betas + theta
+    null_idx = arma::join_cols(
+        arma::regspace<arma::uvec>(0, kx_null - 1),
+        arma::regspace<arma::uvec>(kx_full, np_fim - 1));
+  } else {
+    null_idx = arma::regspace<arma::uvec>(0, kx_null - 1);
+  }
+  arma::mat I_nn = fim(null_idx, null_idx);
+  arma::mat I_nt = fim(null_idx, test_idx);
+  arma::mat I_tt = fim(test_idx, test_idx);
+  arma::mat I_test = I_tt - I_nt.t() * arma::solve(I_nn, I_nt);
+
+  // Score test statistic: T = U' I_eff^{-1} U ~ chi2(n_test)
+  double T_stat;
+  arma::vec beta_hat(n_test);  // ratio estimator: beta = U / I
+
+  if (n_test == 1) {
+    double I_val = I_test(0, 0);
+    T_stat = U_test(0) * U_test(0) / I_val;
+    beta_hat(0) = U_test(0) / I_val;
+  } else {
+    arma::mat I_test_inv = arma::solve(I_test, arma::eye(n_test, n_test));
+    T_stat = arma::as_scalar(U_test.t() * I_test_inv * U_test);
+    beta_hat = I_test_inv * U_test;
+  }
+
+  // p-value: chi-squared approximation (baseline)
+  double pvalue = R::pchisq(T_stat, static_cast<double>(n_test), 0, 0);
+
+  // SPA: if requested and |z| > cutoff, refine p-value using saddlepoint
+  bool spa_applied = false;
+  if (use_spa && n_test == 1 && std::sqrt(T_stat) > spa_cutoff) {
+    // Compute g_tilde: covariate-projected test variable
+    // g_tilde = x_test - X_null * solve(I_nn_beta, I_n_test_beta)
+    // Use only the beta blocks (exclude theta) for the projection
+    arma::mat I_nn_beta = fim.submat(0, 0, kx_null - 1, kx_null - 1);
+    arma::vec I_nt_beta = fim.submat(0, kx_null, kx_null - 1, kx_null);
+    arma::vec proj_coef = arma::solve(I_nn_beta, I_nt_beta);
+    arma::vec g_tilde = X_full.col(kx_null) - X_full.cols(0, kx_null - 1) * proj_coef;
+    arma::vec g_tilde_pos = g_tilde.elem(Y1);
+
+    // Observed adjusted score
+    double q_obs = U_test(0);
+
+    double p_spa = spa_pvalue_twosided(
+        q_obs, pvalue, beta_full, theta_fim, X_full.rows(Y1),
+        offsetx.elem(Y1), weights.elem(Y1), g_tilde_pos);
+
+    if (p_spa >= 0 && p_spa <= 1.0) {
+      pvalue = p_spa;
+      spa_applied = true;
+    }
+  }
+
+  // SE: back-computed from p-value to keep beta/SE/p consistent.
+  arma::vec se_hat(n_test);
+  if (pvalue > 0.0 && pvalue < 1.0) {
+    double z_abs = R::qnorm(pvalue / 2.0, 0.0, 1.0, 0, 0);
+    for (int j = 0; j < n_test; j++) {
+      se_hat(j) = std::abs(beta_hat(j)) / z_abs;
+    }
+  } else {
+    for (int j = 0; j < n_test; j++) {
+      se_hat(j) = (pvalue == 0.0) ? 0.0 : R_PosInf;
+    }
+  }
+
+  return Rcpp::List::create(
+      Rcpp::Named("beta") = beta_hat,
+      Rcpp::Named("se") = se_hat,
+      Rcpp::Named("statistic") = T_stat,
+      Rcpp::Named("pvalue") = pvalue,
+      Rcpp::Named("spa_applied") = spa_applied);
 }
 
 // [[Rcpp::export]]

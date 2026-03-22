@@ -13,6 +13,9 @@ fast_negbin_hurdle(
   method = "BFGS",
   maxit = 10000,
   separate = TRUE,
+  score_test = NULL,
+  null_fit = NULL,
+  spa_cutoff = 2,
   compute_fitted = FALSE
 )
 }
@@ -33,9 +36,19 @@ fast_negbin_hurdle(
 
 \item{separate}{Logical. If TRUE, count and zero components are estimated separately. Default is TRUE.}
 
+\item{score_test}{Optional. Column name(s) or integer index(es) in X to compute
+a score test for in the count component. When specified, the full count model is
+NOT fitted — only the null model (X without the test columns). This is faster
+and gives better-calibrated p-values. See Details and \code{\link{fasthurdle}}
+for background on the score test.}
+
+\item{null_fit}{Optional. A pre-fitted null model from \code{\link{fit_null_count}}.
+When provided with \code{score_test}, the null model is not re-fitted. This is
+useful for testing many predictors against the same null (e.g., many peaks per gene).}
+
 \item{compute_fitted}{Logical. If FALSE (default), skip computing fitted values
 and residuals for speed. Set to TRUE if you need fitted.values, residuals, y, or x
-in the returned object.}
+in the returned object. Not available when \code{score_test} is used.}
 }
 \value{
 An object of class "fasthurdle" representing the fitted model.
@@ -46,10 +59,21 @@ with binomial zero hurdle model and logit link. This function is optimized
 for speed by skipping all unnecessary parameter checks and validations.
 }
 \details{
-This function is a specialized version of fasthurdle that only handles the specific
-parameter combination: dist = "negbin", zero.dist = "binomial", link = "logit".
-It takes a model matrix and response vector directly, skipping formula processing
-and other parameter validations to improve performance.
+## Score test mode
+
+When \code{score_test} is specified, the function operates differently:
+\itemize{
+  \item The full count model is NOT fitted — only the null model (covariates only).
+  \item The test variable's beta and SE are computed using the score test ratio estimator
+    (\code{beta = score / information}), which is asymptotically equivalent to the MLE.
+  \item Covariate coefficients are the null model MLEs (valid under H0).
+  \item \code{loglik} is the null model's log-likelihood, not the full model's.
+  \item \code{vcov} contains the null model's covariance for covariates and the
+    score-based variance for the test variable. Cross-covariances are NA.
+  \item \code{AIC()} and \code{BIC()} reflect the null model.
+  \item \code{theta} is estimated from the null model.
+  \item \code{compute_fitted} is not available (fitted values require the full model).
+}
 }
 \examples{
 \dontrun{
@@ -60,8 +84,18 @@ data(bioChemists, package = "pscl")
 X <- model.matrix(~ fem + mar + kid5 + phd + ment, data = bioChemists)
 y <- bioChemists$art
 
-# Fit the model
+# Fit the model (Wald test)
 m <- fast_negbin_hurdle(X, y)
+summary(m)
+
+# Fit with score test for 'ment'
+m <- fast_negbin_hurdle(X, y, score_test = "ment")
+summary(m)
+
+# High-throughput: cache null model, test many variables
+X_null <- model.matrix(~ fem + mar + kid5 + phd, data = bioChemists)
+null_fit <- fit_null_count(X_null, y, dist = "negbin")
+m <- fast_negbin_hurdle(X, y, score_test = "ment", null_fit = null_fit)
 summary(m)
 }
 
