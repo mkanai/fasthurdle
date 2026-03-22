@@ -169,9 +169,9 @@ test_that("SPA refines beta and adjusts p-value vs chi-squared", {
   r_spa <- score_test_count(d$X_null, d$x, d$y, dist = "negbin", spa_cutoff = 2)
   expect_true(r_spa$spa_applied)
   # SPA path refines beta (5-iter BFGS from score warm start)
-  # Refined beta should be closer to Wald MLE than ratio estimator
-  # Both within 10% of true beta (0.3) for N(0,1) predictor
-  expect_equal(r_spa$beta[1], 0.3, tolerance = 0.1)
+  # Refined beta within 5% of true for N(0,1) predictor
+  # Ratio estimator (chi2 path) within 10%
+  expect_equal(r_spa$beta[1], 0.3, tolerance = 0.05)
   expect_equal(r_chi2$beta[1], 0.3, tolerance = 0.1)
   # P-values differ (SPA adjusts tail)
   expect_true(r_spa$pvalue != r_chi2$pvalue)

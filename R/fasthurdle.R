@@ -26,9 +26,8 @@
 #'   a score test for. The score test evaluates the significance of the test variable(s)
 #'   at the null MLE (without the test variable), giving better-calibrated p-values than
 #'   the Wald test when the NB dispersion parameter theta is poorly identified (e.g.,
-#'   when positive counts are approximately Poisson). Beta and SE for the test variable
-#'   are derived from the score test ratio estimator (\code{beta = score / information}),
-#'   which is asymptotically equivalent to the MLE. See Details.
+#'   when positive counts are approximately Poisson). For significant tests, beta is
+#'   refined via a short BFGS optimization from the score estimate. See Details.
 #' @param null_fit Optional. A pre-fitted null model from \code{\link{fit_null_count}}.
 #'   When provided with \code{score_test}, the null model is not re-fitted. This is
 #'   useful for testing many predictors against the same null (e.g., many peaks per gene
@@ -75,9 +74,10 @@
 #'     alpha = 0.05).
 #' }
 #'
-#' The score test beta/SE use the ratio estimator (\code{beta = score / information},
-#' \code{SE = 1 / sqrt(information)}) with the Schur complement to adjust for covariates.
-#' This is the same approach used by SAIGE-QTL for single-cell eQTL testing.
+#' The score test p-value uses SPA with a closed-form zero-truncated NB cumulant
+#' generating function for numerically stable tail probabilities at any sample size.
+#' For significant tests, beta is refined via 5-iteration BFGS from the score estimate
+#' (within ~1\% of the full MLE). SE is back-computed from the p-value for consistency.
 #'
 #' @examples
 #' \dontrun{

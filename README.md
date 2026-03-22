@@ -72,7 +72,7 @@ summary(model)
 
 By default, `fasthurdle` uses the **Wald test** for inference, same as `pscl::hurdle`. The **score test** is an alternative that evaluates significance at the null model — it does not fit the full count model, making it both faster (~2x) and better calibrated. The score test is available for all count distributions (negbin, poisson, geometric) and is especially recommended for the NB count model, where the Wald test can produce inflated p-values when the dispersion parameter θ is poorly identified.
 
-With `score_test`, the count component uses a score test for the specified variable, while the zero component remains unchanged (Wald). Beta and SE for the test variable are derived from the score test ratio estimator (`beta = score / information`), and a saddlepoint approximation (SPA) is applied for accurate tail p-values (on by default, `spa_cutoff = 2`). The `summary()` output format is unchanged.
+With `score_test`, the count component uses a score test for the specified variable, while the zero component remains unchanged (Wald). A saddlepoint approximation (SPA) using a closed-form zero-truncated NB cumulant generating function is applied for accurate tail p-values (on by default, `spa_cutoff = 2`). For significant tests, beta is refined via a short BFGS optimization from the score estimate, giving accuracy within ~1% of the full MLE. The `summary()` output format is unchanged.
 
 ```r
 # Wald (default)
@@ -204,7 +204,7 @@ The use of hurdle models for peak-gene link analysis in single-nucleus multiome 
 
 ### v1.2.0 (2026-03-21)
 
-- **New feature**: Score test with saddlepoint approximation (SPA) for the count component (`score_test` parameter in `fast_negbin_hurdle()` and `fasthurdle()`). Available for all count distributions; especially recommended for NB where it fixes Wald test tail inflation when θ is poorly identified. ~2x faster (skips full count model BFGS) and supports cached null models via `fit_null_count()` for high-throughput testing.
+- **New feature**: Score test with saddlepoint approximation (SPA) for the count component (`score_test` parameter in `fast_negbin_hurdle()` and `fasthurdle()`). Available for all count distributions; especially recommended for NB where it fixes Wald test tail inflation when θ is poorly identified. SPA uses a closed-form zero-truncated NB cumulant generating function for numerically stable tail p-values at any sample size. Beta for significant tests is refined via 5-iteration BFGS from the score estimate (within ~1% of full MLE). ~2x faster and supports cached null models via `fit_null_count()` for high-throughput testing.
 
 ### v1.1.1 (2026-03-09)
 

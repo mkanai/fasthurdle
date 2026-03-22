@@ -68,8 +68,9 @@ for speed by skipping all unnecessary parameter checks and validations.
 When \code{score_test} is specified, the function operates differently:
 \itemize{
   \item The full count model is NOT fitted — only the null model (covariates only).
-  \item The test variable's beta and SE are computed using the score test ratio estimator
-    (\code{beta = score / information}), which is asymptotically equivalent to the MLE.
+  \item For significant tests (|z| > \code{spa_cutoff}), beta is refined via a short
+    BFGS optimization from the score estimate (within ~1\% of the full MLE). For
+    non-significant tests, beta uses the ratio estimator (approximate).
   \item Covariate coefficients are the null model MLEs (valid under H0).
   \item \code{loglik} is the null model's log-likelihood, not the full model's.
   \item \code{vcov} contains the null model's covariance for covariates and the

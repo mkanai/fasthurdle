@@ -45,11 +45,13 @@ Default is 10000.}
 }
 \value{
 A list with components:
-  \item{beta}{Ratio estimator of the test coefficient(s): score / information.
-    Asymptotically equivalent to the MLE but computed at the null.}
-  \item{se}{Standard error(s): 1 / sqrt(information).}
+  \item{beta}{Effect size estimate. For significant tests (when SPA fires),
+    refined via 5-iteration BFGS from the score estimate (within ~1\% of full MLE).
+    For non-significant tests, uses the ratio estimator (approximate).}
+  \item{se}{Standard error, back-computed from the p-value for consistency.}
   \item{statistic}{The score test statistic (chi-squared).}
-  \item{pvalue}{The p-value from chi-squared distribution.}
+  \item{pvalue}{The p-value. SPA-adjusted when |z| > \code{spa_cutoff}.}
+  \item{spa_applied}{Logical. Whether SPA was applied.}
   \item{null_par}{The null model MLE parameters.}
   \item{null_convergence}{Convergence status of the null model.}
 }
