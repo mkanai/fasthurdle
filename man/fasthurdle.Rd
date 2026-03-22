@@ -65,6 +65,10 @@ useful for testing many predictors against the same null (e.g., many peaks per g
 in single-cell genomics). The null model can be saved with \code{saveRDS} and
 reloaded for reuse.}
 
+\item{spa_cutoff}{Numeric or NULL. When \code{score_test} is used, apply saddlepoint
+approximation (SPA) for p-values when |z| exceeds this cutoff. Default is 2.
+Set to \code{NULL} or \code{Inf} to disable SPA.}
+
 \item{model}{Logical. If TRUE, the model frame is included in the returned object.}
 
 \item{y}{Logical. If TRUE, the response vector is included in the returned object.}

@@ -21,6 +21,9 @@
 #' @param null_fit Optional. A pre-fitted null model from \code{\link{fit_null_count}}.
 #'   When provided with \code{score_test}, the null model is not re-fitted. This is
 #'   useful for testing many predictors against the same null (e.g., many peaks per gene).
+#' @param spa_cutoff Numeric or NULL. When \code{score_test} is used, apply saddlepoint
+#'   approximation (SPA) for p-values when |z| exceeds this cutoff. Default is 2.
+#'   Set to \code{NULL} or \code{Inf} to disable SPA.
 #' @param compute_fitted Logical. If FALSE (default), skip computing fitted values
 #'   and residuals for speed. Set to TRUE if you need fitted.values, residuals, y, or x
 #'   in the returned object. Not available when \code{score_test} is used.
@@ -104,6 +107,12 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL,
     } else {
       test_idx <- as.integer(score_test)
     }
+    if (length(test_idx) > 1) {
+      stop("score_test currently supports only a single test variable")
+    }
+    if (!separate) {
+      warning("separate = FALSE is ignored when score_test is used")
+    }
     if (compute_fitted) {
       warning("compute_fitted is not available with score_test; ignoring")
       compute_fitted <- FALSE
@@ -150,9 +159,8 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL,
     theta <- c(count = as.vector(exp(null_fit$par[kx_null + 1])))
     SE.logtheta <- c(count = NA_real_)
 
-    # Skip null hessian/loglik evaluation — not needed for score test beta/SE/z/p.
-    # Covariate vcov and loglik/AIC are NA in score test mode.
-    null_loglik <- NA_real_
+    # Use null model loglik (covariate vcov is NA in score test mode)
+    null_loglik <- null_fit$value
     vc_count <- matrix(NA_real_, kx, kx)
     for (j in seq_along(test_idx)) {
       vc_count[test_idx[j], test_idx[j]] <- st_result$se[j]^2
@@ -333,7 +341,7 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL,
     ),
     n = nobs,
     df.null = nobs - 2,
-    df.residual = nobs - (kx + kz + 1),
+    df.residual = if (!is.null(test_idx)) nobs - (length(null_idx) + kz + 1) else nobs - (kx + kz + 1),
     theta = theta,
     SE.logtheta = SE.logtheta,
     loglik = loglik,

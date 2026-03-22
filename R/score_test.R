@@ -68,6 +68,7 @@ fit_null_count <- function(X_null, y, offsetx = NULL, weights = NULL,
   structure(
     list(
       par = null_fit$par,
+      value = null_fit$value,
       convergence = null_fit$convergence,
       dist = dist,
       kx_null = ncol(X_null)
@@ -92,6 +93,9 @@ fit_null_count <- function(X_null, y, offsetx = NULL, weights = NULL,
 #' @param dist Count distribution: "negbin", "poisson", or "geometric".
 #' @param null_fit Optional. A pre-fitted null model from \code{\link{fit_null_count}}.
 #'   If provided, the null model is not re-fitted, saving computation time.
+#' @param spa_cutoff Numeric or NULL. Apply saddlepoint approximation (SPA) for
+#'   p-values when |z| exceeds this cutoff. Default is 2. Set to \code{NULL} or
+#'   \code{Inf} to disable SPA.
 #' @param method Optimization method for fitting the null model (ignored if null_fit
 #'   is provided). Default is "BFGS".
 #' @param maxit Maximum iterations for the null model (ignored if null_fit is provided).
@@ -142,8 +146,13 @@ score_test_count <- function(X_null, x_test, y, offsetx = NULL, weights = NULL,
       offsetx = offsetx, weights = weights,
       dist = dist, method = method, maxit = maxit
     )
-  } else if (null_fit$dist != dist) {
-    stop("null_fit distribution (", null_fit$dist, ") does not match dist (", dist, ")")
+  } else {
+    if (null_fit$dist != dist) {
+      stop("null_fit distribution (", null_fit$dist, ") does not match dist (", dist, ")")
+    }
+    if (null_fit$kx_null != ncol(X_null)) {
+      stop("null_fit has ", null_fit$kx_null, " covariates but X_null has ", ncol(X_null))
+    }
   }
 
   # Resolve SPA: NULL or Inf disables, numeric enables with that cutoff

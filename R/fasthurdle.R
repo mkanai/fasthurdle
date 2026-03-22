@@ -34,6 +34,9 @@
 #'   useful for testing many predictors against the same null (e.g., many peaks per gene
 #'   in single-cell genomics). The null model can be saved with \code{saveRDS} and
 #'   reloaded for reuse.
+#' @param spa_cutoff Numeric or NULL. When \code{score_test} is used, apply saddlepoint
+#'   approximation (SPA) for p-values when |z| exceeds this cutoff. Default is 2.
+#'   Set to \code{NULL} or \code{Inf} to disable SPA.
 #' @param model Logical. If TRUE, the model frame is included in the returned object.
 #' @param y Logical. If TRUE, the response vector is included in the returned object.
 #' @param x Logical. If TRUE, the model matrices are included in the returned object.
@@ -244,6 +247,9 @@ fasthurdle <- function(formula, data, subset, na.action, weights, offset,
   # Score test for count component (if requested)
   score_test_result <- NULL
   if (!is.null(score_test)) {
+    if (length(score_test) > 1) {
+      stop("score_test currently supports only a single test variable")
+    }
     if (is.character(score_test)) {
       test_idx <- match(score_test, colnames(X))
       if (any(is.na(test_idx))) {

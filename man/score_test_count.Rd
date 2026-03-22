@@ -33,6 +33,10 @@ score_test_count(
 \item{null_fit}{Optional. A pre-fitted null model from \code{\link{fit_null_count}}.
 If provided, the null model is not re-fitted, saving computation time.}
 
+\item{spa_cutoff}{Numeric or NULL. Apply saddlepoint approximation (SPA) for
+p-values when |z| exceeds this cutoff. Default is 2. Set to \code{NULL} or
+\code{Inf} to disable SPA.}
+
 \item{method}{Optimization method for fitting the null model (ignored if null_fit
 is provided). Default is "BFGS".}
 

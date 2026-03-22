@@ -46,6 +46,10 @@ for background on the score test.}
 When provided with \code{score_test}, the null model is not re-fitted. This is
 useful for testing many predictors against the same null (e.g., many peaks per gene).}
 
+\item{spa_cutoff}{Numeric or NULL. When \code{score_test} is used, apply saddlepoint
+approximation (SPA) for p-values when |z| exceeds this cutoff. Default is 2.
+Set to \code{NULL} or \code{Inf} to disable SPA.}
+
 \item{compute_fitted}{Logical. If FALSE (default), skip computing fitted values
 and residuals for speed. Set to TRUE if you need fitted.values, residuals, y, or x
 in the returned object. Not available when \code{score_test} is used.}

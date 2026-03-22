@@ -48,8 +48,10 @@ saveRDS(null_fit, "null_fit_gene1.rds")
 # Reuse for each peak
 null_fit <- readRDS("null_fit_gene1.rds")
 for (peak in peaks) {
-  model <- fast_negbin_hurdle(X, y, offsetx = off, score_test = "peak_acc",
-                               null_fit = null_fit)
+  model <- fast_negbin_hurdle(X, y,
+    offsetx = off, score_test = "peak_acc",
+    null_fit = null_fit
+  )
   results[[peak]] <- model$score_test$pvalue
 }
 }
