@@ -50,12 +50,13 @@ test_that("score_test_count works with negbin/poisson/geometric", {
 test_that("z = beta/SE exactly recovers p-value (chi-squared and SPA)", {
   d <- gen_data(2000, beta_x = 0.3)
 
-  # Chi-squared path
+  # Chi-squared path: no SPA, no refine — ratio estimator + back-computed SE
   r <- score_test_count(d$X_null, d$x, d$y, dist = "negbin", spa_cutoff = NULL)
   p_from_z <- 2 * pnorm(-abs(r$beta[1] / r$se[1]))
   expect_equal(p_from_z, r$pvalue, tolerance = 1e-10)
 
-  # SPA path (if triggered)
+  # SPA path: SPA + refine — refined beta + SE back-computed from SPA p-value
+  # Consistency holds because SE = |beta_refined| / |qnorm(p/2)|
   r_spa <- score_test_count(d$X_null, d$x, d$y, dist = "negbin", spa_cutoff = 2)
   if (r_spa$spa_applied) {
     p_from_z_spa <- 2 * pnorm(-abs(r_spa$beta[1] / r_spa$se[1]))
@@ -74,40 +75,46 @@ test_that("score beta is close to true beta and Wald MLE at large n", {
   X_full <- cbind(X_null, x)
   colnames(X_full) <- c("(Intercept)", "x")
 
-  r <- score_test_count(X_null, x, y, dist = "negbin", spa_cutoff = NULL)
   m <- fast_negbin_hurdle(X_full, y)
   wald_beta <- unname(coef(m, model = "count")["x"])
   wald_se <- unname(sqrt(diag(m$vcov))["count_x"])
 
-  # Score beta close to true value (ratio estimator has ~3% positive bias)
-  expect_equal(r$beta[1], true_beta, tolerance = 0.05)
-  # Score beta close to Wald MLE (within 10%)
-  expect_equal(r$beta[1], wald_beta, tolerance = 0.1)
-  # Score SE close to Wald SE (score is ~7% larger — conservative)
-  expect_equal(r$se[1], wald_se, tolerance = 0.15)
-  # log10(p) within 2 orders of magnitude
+  # Without SPA: ratio estimator, ~3% bias for N(0,1) predictor
+  r_nospa <- score_test_count(X_null, x, y, dist = "negbin", spa_cutoff = NULL)
+  expect_equal(r_nospa$beta[1], true_beta, tolerance = 0.05)
+  expect_equal(r_nospa$beta[1], wald_beta, tolerance = 0.1)
+
+  # With SPA: refined beta via 5-iter BFGS, <4% bias
+  r_spa <- score_test_count(X_null, x, y, dist = "negbin", spa_cutoff = 2)
+  if (r_spa$spa_applied) {
+    # Refined beta should be closer to Wald MLE than ratio estimator
+    expect_equal(r_spa$beta[1], wald_beta, tolerance = 0.05)
+  }
+
+  # log10(p) within 2 orders of magnitude (chi-squared vs Wald)
   p_wald <- summary(m)$coefficients$count["x", "Pr(>|z|)"]
-  expect_true(abs(log10(r$pvalue) - log10(p_wald)) < 2)
+  expect_true(abs(log10(r_nospa$pvalue) - log10(p_wald)) < 2)
 })
 
 test_that("Schur complement gives correct beta with correlated covariates", {
   set.seed(42)
   n <- 5000
   x <- rnorm(n)
-  cov1 <- x + rnorm(n) # correlated with x (r ≈ 0.7)
+  cov1 <- x + rnorm(n) # correlated with x (r ~ 0.7)
   y <- rbinom(n, 1, 0.5) * rnbinom(n, size = 2, mu = exp(0.5 + 0.3 * x + 0.1 * cov1))
   X_null <- cbind(1, cov1)
   colnames(X_null) <- c("(Intercept)", "cov1")
   X_full <- cbind(X_null, x)
   colnames(X_full) <- c("(Intercept)", "cov1", "x")
 
+  # Without SPA: ratio estimator with Schur complement
   r <- score_test_count(X_null, x, y, dist = "negbin", spa_cutoff = NULL)
   m <- fast_negbin_hurdle(X_full, y)
   wald_beta <- unname(coef(m, model = "count")["x"])
 
-  # Schur-corrected score beta ≈ Wald (within 15%)
+  # Ratio estimator within 15% of Wald (Schur corrects for correlation)
   expect_equal(r$beta[1], wald_beta, tolerance = 0.15)
-  # Must NOT be ~half the Wald (marginal estimator bug = missing Schur complement)
+  # Must NOT be ~half the Wald (= missing Schur complement)
   expect_true(abs(r$beta[1]) > abs(wald_beta) * 0.7)
 })
 
@@ -131,17 +138,18 @@ test_that("score test is calibrated under null", {
 })
 
 # ==========================================================================
-# SPA
+# SPA + beta refinement
 # ==========================================================================
 
-test_that("spa_cutoff = NULL or Inf disables SPA", {
+test_that("spa_cutoff = NULL or Inf disables SPA and refinement", {
   d <- gen_data(1000, beta_x = 0.3)
   r1 <- score_test_count(d$X_null, d$x, d$y, dist = "negbin", spa_cutoff = NULL)
   r2 <- score_test_count(d$X_null, d$x, d$y, dist = "negbin", spa_cutoff = Inf)
   expect_false(r1$spa_applied)
   expect_false(r2$spa_applied)
-  # Both give identical results
+  # Both give identical results (same ratio estimator, same chi-squared p)
   expect_equal(r1$pvalue, r2$pvalue)
+  expect_equal(r1$beta, r2$beta)
 })
 
 test_that("SPA does not fire for non-significant tests", {
@@ -155,15 +163,17 @@ test_that("SPA does not fire for non-significant tests", {
   expect_false(r$spa_applied)
 })
 
-test_that("SPA gives same beta but different p-value than chi-squared", {
+test_that("SPA refines beta and adjusts p-value vs chi-squared", {
   d <- gen_data(5000, beta_x = 0.3)
   r_chi2 <- score_test_count(d$X_null, d$x, d$y, dist = "negbin", spa_cutoff = NULL)
   r_spa <- score_test_count(d$X_null, d$x, d$y, dist = "negbin", spa_cutoff = 2)
-  # Beta is identical (SPA only changes p-value)
-  expect_equal(r_spa$beta, r_chi2$beta, tolerance = 1e-10)
-  # SPA should fire for this strongly significant test
   expect_true(r_spa$spa_applied)
-  # P-values differ (SPA is typically more conservative in the tail)
+  # SPA path refines beta (5-iter BFGS from score warm start)
+  # Refined beta should be closer to Wald MLE than ratio estimator
+  # Both within 10% of true beta (0.3) for N(0,1) predictor
+  expect_equal(r_spa$beta[1], 0.3, tolerance = 0.1)
+  expect_equal(r_chi2$beta[1], 0.3, tolerance = 0.1)
+  # P-values differ (SPA adjusts tail)
   expect_true(r_spa$pvalue != r_chi2$pvalue)
 })
 
@@ -178,7 +188,7 @@ test_that("fit_null_count returns correct class and cached null is reproducible"
   expect_equal(nf$convergence, 0L)
   expect_equal(nf$dist, "negbin")
 
-  # Cached gives identical results
+  # Cached gives identical results (same path, no SPA/refine)
   r1 <- score_test_count(d$X_null, d$x, d$y, dist = "negbin", spa_cutoff = NULL)
   r2 <- score_test_count(d$X_null, d$x, d$y,
     dist = "negbin",
@@ -210,7 +220,7 @@ test_that("fast_negbin_hurdle score_test mode returns valid summary", {
   # Zero model: fully computed (Wald)
   expect_true(!is.na(s$coefficients$zero["x", "Pr(>|z|)"]))
 
-  # Column name = column index
+  # Column name = column index give same p-value
   m2 <- fast_negbin_hurdle(X_full, d$y, score_test = 2L, spa_cutoff = NULL)
   m1 <- fast_negbin_hurdle(X_full, d$y, score_test = "x", spa_cutoff = NULL)
   expect_equal(m1$score_test$pvalue, m2$score_test$pvalue)

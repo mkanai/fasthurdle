@@ -1124,93 +1124,158 @@ struct ZtnbCgfResult {
   double K2;  // Second derivative
 };
 
-// Evaluate CGF of the ZTNB score test statistic at a given t.
-// g_tilde_pos: covariate-projected test variable for Y>0 observations.
-ZtnbCgfResult compute_ztnb_cgf(
-    double t, const arma::vec &beta, double theta,
-    const arma::mat &X_pos, const arma::vec &offset_pos,
-    const arma::vec &w_pos, const arma::vec &g_tilde_pos,
-    double quantile_cutoff = 0.9999) {
+// Pre-computed per-observation constants for closed-form CGF evaluation.
+// The ZTNB score s_eta(y) = alpha*y - C is linear in y, so the CGF
+// uses the NB MGF in closed form — no PMF summation needed.
+struct ZtnbCgfObsCache {
+  double mu;
+  double alpha;      // theta / (mu + theta)
+  double C_i;        // alpha * mu * (1 + r), where r = p0/(1-p0)
+  double p0;         // (theta/(mu+theta))^theta
+  double log_p1;     // log(1 - p0)
+  double gi;         // covariate-projected test variable
+  double wi;         // weight
+  double lambda_max;  // log(1 + theta/mu) = MGF domain bound
+};
+
+// Build per-observation cache for closed-form CGF.
+std::vector<ZtnbCgfObsCache> build_cgf_cache(
+    const arma::vec &beta, double theta, const arma::mat &X_pos,
+    const arma::vec &offset_pos, const arma::vec &w_pos,
+    const arma::vec &g_tilde_pos) {
   int n_pos = X_pos.n_rows;
   double log_theta = std::log(theta);
-  ZtnbCgfResult result = {0.0, 0.0, 0.0};
+  std::vector<ZtnbCgfObsCache> cache;
+  cache.reserve(n_pos);
 
   for (int i = 0; i < n_pos; i++) {
     double gi = g_tilde_pos(i);
-    double wi = w_pos(i);
-    if (std::abs(gi) < 1e-15) continue;  // skip zero-contribution obs
+    if (std::abs(gi) < 1e-15) continue;
 
     double eta_i = arma::dot(X_pos.row(i), beta) + offset_pos(i);
     double mu = std::exp(eta_i);
     double mu_theta = mu + theta;
-    double mu_over_mutheta = mu / mu_theta;
+    double alpha = theta / mu_theta;
 
     double log_p0 = theta * (log_theta - std::log(mu_theta));
     double p0 = std::exp(log_p0);
-    double p1 = 1.0 - p0;
-    if (p1 < 1e-300) p1 = 1e-300;
-    double r = p0 / p1;
-    double c_trunc_eta = r * theta * mu_over_mutheta;
+    // Stable log(1-p0): use log(-expm1(log_p0)) when p0 > 0.5
+    double log_p1 =
+        (p0 > 0.5) ? std::log(-std::expm1(log_p0)) : std::log1p(-p0);
+    double p1 = std::exp(log_p1);
+    if (p1 < 1e-300) {
+      // p1 ≈ 0 means this obs has degenerate ZTNB — SPA cannot be used
+      cache.clear();
+      return cache;  // empty cache signals SPA failure
+    }
+    // r = p0/p1 in log space for stability
+    double r = std::exp(log_p0 - log_p1);
 
-    int y_max = static_cast<int>(
-        R::qnbinom(quantile_cutoff, theta, theta / mu_theta, 1, 0));
-    if (y_max < 1) y_max = 1;
-    if (y_max > 10000) y_max = 10000;
+    ZtnbCgfObsCache obs;
+    obs.mu = mu;
+    obs.alpha = alpha;
+    obs.C_i = alpha * mu * (1.0 + r);
+    obs.p0 = p0;
+    obs.log_p1 = log_p1;
+    obs.gi = gi;
+    obs.wi = w_pos(i);
+    obs.lambda_max = std::log(1.0 + theta / mu);
+    cache.push_back(obs);
+  }
+  return cache;
+}
 
-    double pmf =
-        std::exp(R::dnbinom_mu(1.0, theta, mu, 1) - std::log(p1));
-    double pmf_ratio = mu_over_mutheta;
+// Evaluate closed-form CGF at t. No PMF loop — O(1) per observation.
+//
+// K_i(t) = -C_i*g_i*t + log(M_NB(lambda) - p0) - log(1-p0)
+// where lambda = alpha_i * g_i * t, M_NB(lambda) = (theta/D)^theta,
+// D = theta + mu*(1 - exp(lambda))
+// Return value signaling CGF failure (NaN propagation triggers fallback)
+static const ZtnbCgfResult CGF_FAILURE = {
+    std::numeric_limits<double>::quiet_NaN(),
+    std::numeric_limits<double>::quiet_NaN(),
+    std::numeric_limits<double>::quiet_NaN()};
 
-    // Accumulate: sum_exp = Σ pmf * exp(t*s*g), etc.
-    double sum_exp = 0.0, sum_exp_sg = 0.0, sum_exp_sg2 = 0.0;
+ZtnbCgfResult compute_ztnb_cgf_cached(
+    double t, double theta, const std::vector<ZtnbCgfObsCache> &cache) {
+  ZtnbCgfResult result = {0.0, 0.0, 0.0};
 
-    for (int y = 1; y <= y_max; y++) {
-      if (y > 1) {
-        pmf *= (y - 1.0 + theta) / static_cast<double>(y) * pmf_ratio;
-      }
-      if (pmf < 1e-300) continue;
+  for (const auto &obs : cache) {
+    double lambda = obs.alpha * obs.gi * t;
 
-      double y_d = static_cast<double>(y);
-      double s_eta = y_d - mu * (y_d + theta) / mu_theta - c_trunc_eta;
-      double sg = s_eta * gi;
-      double exp_tsg = std::exp(t * sg);
+    // Check MGF domain: need D > 0, i.e., lambda < log(1 + theta/mu)
+    if (lambda >= obs.lambda_max * 0.999) return CGF_FAILURE;
 
-      double pmf_exp = pmf * exp_tsg;
-      sum_exp += pmf_exp;
-      sum_exp_sg += pmf_exp * sg;
-      sum_exp_sg2 += pmf_exp * sg * sg;
+    double el = std::exp(lambda);
+    double D = theta + obs.mu * (1.0 - el);
+    if (D <= 1e-300) return CGF_FAILURE;
+
+    // M_NB = (theta/D)^theta
+    double log_M = theta * (std::log(theta) - std::log(D));
+    double M = std::exp(log_M);
+    double M_minus_p0 = M - obs.p0;
+
+    // Numerical stability: when M ≈ p0 (small |lambda|), use expm1 form
+    // M/p0 = ((theta+mu)/D)^theta, so M/p0 - 1 = expm1(theta*log((theta+mu)/D))
+    double log_M_minus_p0;
+    if (std::abs(M_minus_p0) < obs.p0 * 1e-6) {
+      double log_ratio = theta * std::log((theta + obs.mu) / D);
+      double ratio = std::expm1(log_ratio);  // expm1 for stability near 0
+      if (ratio <= 0) return CGF_FAILURE;
+      log_M_minus_p0 = std::log(obs.p0) + std::log1p(ratio - 1.0 + 1.0);
+      // simplify: log(p0) + log(ratio) since ratio = expm1(x) > 0
+      log_M_minus_p0 = std::log(obs.p0) + std::log(ratio);
+    } else {
+      if (M_minus_p0 <= 0) return CGF_FAILURE;
+      log_M_minus_p0 = std::log(M_minus_p0);
     }
 
-    if (sum_exp > 1e-300) {
-      result.K += wi * std::log(sum_exp);
-      double ratio1 = sum_exp_sg / sum_exp;
-      result.K1 += wi * ratio1;
-      result.K2 += wi * (sum_exp_sg2 / sum_exp - ratio1 * ratio1);
-    }
+    // K_i(t) = -C*g*t + log(M-p0) - log(p1)
+    double K_i = -obs.C_i * obs.gi * t + log_M_minus_p0 - obs.log_p1;
+
+    // Derivatives via h = theta * mu * exp(lambda) / D
+    double mu_el = obs.mu * el;
+    double h = theta * mu_el / D;
+
+    // M' = dM/dlambda = h * M
+    double M1 = h * M;
+
+    // R = M1 / (M - p0) = h * M / (M - p0)
+    double R = M1 / M_minus_p0;
+
+    // K_i'(t) = alpha*g * (-C/(alpha) + R) = alpha*g*R - C*g
+    double ag = obs.alpha * obs.gi;
+    double K1_i = ag * R - obs.C_i * obs.gi;
+
+    // M'' = M * h * (h + 1 + mu*exp(lambda)/D)
+    // K_i''(t) = (alpha*g)^2 * [M''/(M-p0) - R^2]
+    //          = (alpha*g)^2 * [h*(h + 1 + mu_el/D) * M/(M-p0) - R^2]
+    //          = (alpha*g)^2 * [R*(h + 1 + mu_el/D) - R^2]
+    //          = (alpha*g)^2 * R * (h + 1 + mu_el/D - R)
+    double K2_i = ag * ag * R * (h + 1.0 + mu_el / D - R);
+
+    result.K += obs.wi * K_i;
+    result.K1 += obs.wi * K1_i;
+    result.K2 += obs.wi * K2_i;
   }
 
   return result;
 }
 
 // Find saddlepoint: solve K'(zeta) = q using Newton's method with bisection
-// fallback. Returns zeta and convergence status.
+// fallback. Uses pre-computed cache for efficiency.
 struct SaddlepointResult {
   double zeta;
   bool converged;
 };
 
 SaddlepointResult find_saddlepoint(
-    double q, const arma::vec &beta, double theta,
-    const arma::mat &X_pos, const arma::vec &offset_pos,
-    const arma::vec &w_pos, const arma::vec &g_tilde_pos,
-    double tol = 1e-8, int maxiter = 100,
-    double quantile_cutoff = 0.9999) {
+    double q, double theta, const std::vector<ZtnbCgfObsCache> &cache,
+    double tol = 1e-8, int maxiter = 100) {
   SaddlepointResult res = {0.0, false};
   double t = 0.0;
 
-  // Initial CGF at t=0 (reused in first iteration for K2)
-  auto cgf = compute_ztnb_cgf(t, beta, theta, X_pos, offset_pos, w_pos,
-                                g_tilde_pos, quantile_cutoff);
+  auto cgf = compute_ztnb_cgf_cached(t, theta, cache);
   double K1_eval = cgf.K1 - q;
   double K2_eval = cgf.K2;
   double prev_jump = std::numeric_limits<double>::infinity();
@@ -1225,9 +1290,7 @@ SaddlepointResult find_saddlepoint(
       return res;
     }
 
-    // Evaluate CGF at Newton step
-    cgf = compute_ztnb_cgf(tnew, beta, theta, X_pos, offset_pos, w_pos,
-                            g_tilde_pos, quantile_cutoff);
+    cgf = compute_ztnb_cgf_cached(tnew, theta, cache);
     double new_K1 = cgf.K1 - q;
 
     if (std::isnan(tnew) || std::isnan(new_K1)) break;
@@ -1236,8 +1299,7 @@ SaddlepointResult find_saddlepoint(
     if ((K1_eval > 0) != (new_K1 > 0)) {
       if (std::abs(tnew - t) > (prev_jump - tol)) {
         tnew = t + ((new_K1 > K1_eval) ? 1.0 : -1.0) * prev_jump / 2.0;
-        cgf = compute_ztnb_cgf(tnew, beta, theta, X_pos, offset_pos, w_pos,
-                                g_tilde_pos, quantile_cutoff);
+        cgf = compute_ztnb_cgf_cached(tnew, theta, cache);
         new_K1 = cgf.K1 - q;
         prev_jump = prev_jump / 2.0;
       } else {
@@ -1247,7 +1309,7 @@ SaddlepointResult find_saddlepoint(
 
     t = tnew;
     K1_eval = new_K1;
-    K2_eval = cgf.K2;  // reuse for next iteration
+    K2_eval = cgf.K2;
   }
 
   res.zeta = t;
@@ -1257,12 +1319,9 @@ SaddlepointResult find_saddlepoint(
 
 // Compute SPA p-value using Lugannani-Rice formula (one-sided tail prob)
 double spa_pvalue_one_tail(
-    double zeta, double q, const arma::vec &beta, double theta,
-    const arma::mat &X_pos, const arma::vec &offset_pos,
-    const arma::vec &w_pos, const arma::vec &g_tilde_pos,
-    double quantile_cutoff = 0.9999) {
-  auto cgf = compute_ztnb_cgf(zeta, beta, theta, X_pos, offset_pos, w_pos,
-                                g_tilde_pos, quantile_cutoff);
+    double zeta, double q, double theta,
+    const std::vector<ZtnbCgfObsCache> &cache) {
+  auto cgf = compute_ztnb_cgf_cached(zeta, theta, cache);
 
   double temp1 = zeta * q - cgf.K;
   if (!std::isfinite(cgf.K) || !std::isfinite(cgf.K2) || temp1 < 0 ||
@@ -1286,25 +1345,17 @@ double spa_pvalue_one_tail(
 }
 
 // Full two-sided SPA p-value. Falls back to pval_nospa on failure.
-double spa_pvalue_twosided(
-    double q, double pval_nospa, const arma::vec &beta, double theta,
-    const arma::mat &X_pos, const arma::vec &offset_pos,
-    const arma::vec &w_pos, const arma::vec &g_tilde_pos,
-    double tol = 1e-8, double quantile_cutoff = 0.9999) {
-  // Solve for q and -q (two-sided)
-  auto sp1 = find_saddlepoint(q, beta, theta, X_pos, offset_pos, w_pos,
-                                g_tilde_pos, tol, 100, quantile_cutoff);
-  auto sp2 = find_saddlepoint(-q, beta, theta, X_pos, offset_pos, w_pos,
-                                g_tilde_pos, tol, 100, quantile_cutoff);
+// Takes pre-built cache; build it once with build_cgf_cache() before calling.
+double spa_pvalue_twosided(double q, double pval_nospa, double theta,
+                           const std::vector<ZtnbCgfObsCache> &cache,
+                           double tol = 1e-8) {
+  auto sp1 = find_saddlepoint(q, theta, cache, tol);
+  auto sp2 = find_saddlepoint(-q, theta, cache, tol);
 
   if (!sp1.converged || !sp2.converged) return pval_nospa;
 
-  double p1 = spa_pvalue_one_tail(sp1.zeta, q, beta, theta, X_pos,
-                                    offset_pos, w_pos, g_tilde_pos,
-                                    quantile_cutoff);
-  double p2 = spa_pvalue_one_tail(sp2.zeta, -q, beta, theta, X_pos,
-                                    offset_pos, w_pos, g_tilde_pos,
-                                    quantile_cutoff);
+  double p1 = spa_pvalue_one_tail(sp1.zeta, q, theta, cache);
+  double p2 = spa_pvalue_one_tail(sp2.zeta, -q, theta, cache);
 
   if (p1 < 0 || p2 < 0) return pval_nospa;
 
@@ -1422,24 +1473,98 @@ Rcpp::List score_test_count_cpp(
   bool spa_applied = false;
   if (use_spa && n_test == 1 && std::sqrt(T_stat) > spa_cutoff) {
     // Compute g_tilde: covariate-projected test variable
-    // g_tilde = x_test - X_null * solve(I_nn_beta, I_n_test_beta)
-    // Use only the beta blocks (exclude theta) for the projection
     arma::mat I_nn_beta = fim.submat(0, 0, kx_null - 1, kx_null - 1);
     arma::vec I_nt_beta = fim.submat(0, kx_null, kx_null - 1, kx_null);
     arma::vec proj_coef = arma::solve(I_nn_beta, I_nt_beta);
-    arma::vec g_tilde = X_full.col(kx_null) - X_full.cols(0, kx_null - 1) * proj_coef;
+    arma::vec g_tilde =
+        X_full.col(kx_null) - X_full.cols(0, kx_null - 1) * proj_coef;
     arma::vec g_tilde_pos = g_tilde.elem(Y1);
 
-    // Observed adjusted score
-    double q_obs = U_test(0);
+    // Build per-observation cache once, reused across all Newton iterations
+    // Empty cache signals a degenerate observation — skip SPA entirely
+    auto cgf_cache = build_cgf_cache(beta_full, theta_fim, X_full.rows(Y1),
+                                      offsetx.elem(Y1), weights.elem(Y1),
+                                      g_tilde_pos);
 
-    double p_spa = spa_pvalue_twosided(
-        q_obs, pvalue, beta_full, theta_fim, X_full.rows(Y1),
-        offsetx.elem(Y1), weights.elem(Y1), g_tilde_pos);
+    if (!cgf_cache.empty()) {
+      double p_spa =
+          spa_pvalue_twosided(U_test(0), pvalue, theta_fim, cgf_cache);
+      if (p_spa >= 0 && p_spa <= 1.0) {
+        pvalue = p_spa;
+        spa_applied = true;
+      }
+    }
+  }
 
-    if (p_spa >= 0 && p_spa <= 1.0) {
-      pvalue = p_spa;
-      spa_applied = true;
+  // Beta refinement: run a few BFGS iterations from the score estimate
+  // to correct the ratio estimator bias (~20% for count predictors).
+  // Only fires when SPA triggered (significant tests).
+  // Accept refined beta only if finite and objective improved.
+  if (spa_applied && n_test == 1) {
+    arma::vec start_refine;
+    if (dist == "negbin") {
+      start_refine.zeros(kx_full + 1);
+      start_refine.subvec(0, kx_null - 1) = null_par.subvec(0, kx_null - 1);
+      start_refine(kx_null) = beta_hat(0);
+      start_refine(kx_full) = null_par(kx_null);  // logtheta
+    } else {
+      start_refine.zeros(kx_full);
+      start_refine.subvec(0, kx_null - 1) = null_par;
+      start_refine(kx_null) = beta_hat(0);
+    }
+
+    // Evaluate objective at starting point
+    double obj_before;
+    if (dist == "negbin") {
+      CountNegBinFunctor f0(Y, X_full, offsetx, weights);
+      obj_before = f0(start_refine);
+    } else if (dist == "poisson") {
+      CountPoissonFunctor f0(Y, X_full, offsetx, weights);
+      obj_before = f0(start_refine);
+    } else {
+      CountGeomFunctor f0(Y, X_full, offsetx, weights);
+      obj_before = f0(start_refine);
+    }
+
+    // Run 5-iteration BFGS refinement
+    double obj_after = obj_before;
+    double beta_refined = beta_hat(0);
+    if (dist == "negbin") {
+      CountNegBinFunctor functor(Y, X_full, offsetx, weights);
+      arma::vec par = start_refine;
+      Roptim<CountNegBinFunctor> opt("BFGS");
+      opt.control.trace = 0;
+      opt.control.maxit = 5;
+      opt.set_hessian(false);
+      opt.minimize(functor, par);
+      obj_after = opt.value();
+      beta_refined = opt.par()(kx_null);
+    } else if (dist == "poisson") {
+      CountPoissonFunctor functor(Y, X_full, offsetx, weights);
+      arma::vec par = start_refine;
+      Roptim<CountPoissonFunctor> opt("BFGS");
+      opt.control.trace = 0;
+      opt.control.maxit = 5;
+      opt.set_hessian(false);
+      opt.minimize(functor, par);
+      obj_after = opt.value();
+      beta_refined = opt.par()(kx_null);
+    } else {
+      CountGeomFunctor functor(Y, X_full, offsetx, weights);
+      arma::vec par = start_refine;
+      Roptim<CountGeomFunctor> opt("BFGS");
+      opt.control.trace = 0;
+      opt.control.maxit = 5;
+      opt.set_hessian(false);
+      opt.minimize(functor, par);
+      obj_after = opt.value();
+      beta_refined = opt.par()(kx_null);
+    }
+
+    // Accept only if finite and objective improved (or equal)
+    if (std::isfinite(beta_refined) && std::isfinite(obj_after) &&
+        obj_after <= obj_before) {
+      beta_hat(0) = beta_refined;
     }
   }
 
