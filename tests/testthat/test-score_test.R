@@ -180,8 +180,10 @@ test_that("fit_null_count returns correct class and cached null is reproducible"
 
   # Cached gives identical results
   r1 <- score_test_count(d$X_null, d$x, d$y, dist = "negbin", spa_cutoff = NULL)
-  r2 <- score_test_count(d$X_null, d$x, d$y, dist = "negbin",
-                         null_fit = nf, spa_cutoff = NULL)
+  r2 <- score_test_count(d$X_null, d$x, d$y,
+    dist = "negbin",
+    null_fit = nf, spa_cutoff = NULL
+  )
   expect_equal(r1$pvalue, r2$pvalue)
   expect_equal(r1$beta, r2$beta)
 })
