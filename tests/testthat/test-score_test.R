@@ -220,10 +220,11 @@ test_that("fast_negbin_hurdle score_test mode returns valid summary", {
   # Zero model: fully computed (Wald)
   expect_true(!is.na(s$coefficients$zero["x", "Pr(>|z|)"]))
 
-  # Column name = column index give same p-value
-  m2 <- fast_negbin_hurdle(X_full, d$y, score_test = 2L, spa_cutoff = NULL)
-  m1 <- fast_negbin_hurdle(X_full, d$y, score_test = "x", spa_cutoff = NULL)
-  expect_equal(m1$score_test$pvalue, m2$score_test$pvalue)
+  # Integer index is rejected (must use character name)
+  expect_error(
+    fast_negbin_hurdle(X_full, d$y, score_test = 2L),
+    "character"
+  )
 })
 
 test_that("fast_negbin_hurdle accepts cached null_fit", {

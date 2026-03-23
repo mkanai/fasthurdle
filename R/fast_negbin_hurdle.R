@@ -94,22 +94,15 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL,
   if (is.null(offsetx)) offsetx <- rep.int(0, n)
   if (is.null(offsetz)) offsetz <- rep.int(0, n)
 
-  # Resolve score_test column indices
+  # Resolve score_test column index
   test_idx <- NULL
   if (!is.null(score_test)) {
-    if (is.character(score_test)) {
-      test_idx <- match(score_test, colnames(X))
-      if (any(is.na(test_idx))) {
-        stop(
-          "score_test column(s) not found in X: ",
-          paste(score_test[is.na(test_idx)], collapse = ", ")
-        )
-      }
-    } else {
-      test_idx <- as.integer(score_test)
+    if (!is.character(score_test) || length(score_test) != 1) {
+      stop("score_test must be a single column name (character)")
     }
-    if (length(test_idx) > 1) {
-      stop("score_test currently supports only a single test variable")
+    test_idx <- match(score_test, colnames(X))
+    if (is.na(test_idx)) {
+      stop("score_test column '", score_test, "' not found in X")
     }
     if (!separate) {
       warning("separate = FALSE is ignored when score_test is used")
