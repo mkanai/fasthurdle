@@ -175,12 +175,20 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL,
   } else {
     # --- Standard Wald mode: fit full count model ---
     pos_idx <- y > 0
-    model_count <- fastglm::fastglm(
-      X[pos_idx, , drop = FALSE], y[pos_idx],
-      family = poisson(),
-      weights = weights[pos_idx], offset = offsetx[pos_idx]
+    model_count <- tryCatch(
+      fastglm::fastglm(
+        X[pos_idx, , drop = FALSE], y[pos_idx],
+        family = poisson(),
+        weights = weights[pos_idx], offset = offsetx[pos_idx]
+      ),
+      error = function(e) NULL
     )
-    start_count <- c(model_count$coefficients, log(1))
+    if (is.null(model_count) || any(!is.finite(model_count$coefficients))) {
+      pos_mean <- if (any(pos_idx)) mean(log(y[pos_idx] + 0.5) - offsetx[pos_idx]) else 0
+      start_count <- c(pos_mean, rep(0, kx - 1), log(1))
+    } else {
+      start_count <- c(model_count$coefficients, log(1))
+    }
 
     if (separate) {
       fit_count <- optim_count_negbin_cpp(
@@ -251,13 +259,22 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL,
   # Zero component estimation (always Wald)
   # ====================================================================
   if (is.null(fit$zero)) {
-    model_zero_start <- suppressWarnings(fastglm::fastglm(
-      Z, as.integer(y > 0),
-      family = binomial(link = linkstr),
-      weights = weights, offset = offsetz
-    ))
+    model_zero_start <- tryCatch(
+      suppressWarnings(fastglm::fastglm(
+        Z, as.integer(y > 0),
+        family = binomial(link = linkstr),
+        weights = weights, offset = offsetz
+      )),
+      error = function(e) NULL
+    )
+    zero_start <- if (!is.null(model_zero_start) &&
+      all(is.finite(model_zero_start$coefficients))) {
+      model_zero_start$coefficients
+    } else {
+      rep(0, kz)
+    }
     fit_zero <- optim_zero_binom_cpp(
-      start = model_zero_start$coefficients,
+      start = zero_start,
       Y = y, X = Z, offsetx = offsetz, weights = weights, link = linkstr,
       method = method, hessian = TRUE, maxit = maxit, reltol = reltol
     )
