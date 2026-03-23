@@ -16,7 +16,8 @@ fasthurdle(
   link = c("logit", "probit", "cloglog", "cauchit", "log"),
   control = hurdle.control(...),
   score_test = NULL,
-  null_fit = NULL,
+  null_fit_count = NULL,
+  null_fit_zero = NULL,
   spa_cutoff = 2,
   model = TRUE,
   y = TRUE,
@@ -51,18 +52,17 @@ Currently, "logit", "probit", "cloglog", "cauchit", and "log" are supported.}
 
 \item{control}{A list of control parameters passed to the optimizer. See \code{\link{hurdle.control}}.}
 
-\item{score_test}{Optional. Column name(s) of the count model variable(s) to compute
-a score test for. The score test evaluates the significance of the test variable(s)
-at the null MLE (without the test variable), giving better-calibrated p-values than
-the Wald test when the NB dispersion parameter theta is poorly identified (e.g.,
-when positive counts are approximately Poisson). For significant tests, beta is
-refined via a short BFGS optimization from the score estimate. See Details.}
+\item{score_test}{Optional. Column name of the variable to compute a score test for
+in both the count and zero components. The score test evaluates significance at the
+null MLE, giving better-calibrated p-values and faster computation. For significant
+tests, beta is refined via a short BFGS optimization from the score estimate. See Details.}
 
-\item{null_fit}{Optional. A pre-fitted null model from \code{\link{fit_null_count}}.
-When provided with \code{score_test}, the null model is not re-fitted. This is
-useful for testing many predictors against the same null (e.g., many peaks per gene
-in single-cell genomics). The null model can be saved with \code{saveRDS} and
-reloaded for reuse.}
+\item{null_fit_count}{Optional. A pre-fitted count null model from \code{\link{fit_null_count}}.
+When provided with \code{score_test}, the count null is not re-fitted.}
+
+\item{null_fit_zero}{Optional. A pre-fitted zero null model from \code{\link{fit_null_zero}}.
+When provided with \code{score_test}, the zero null is not re-fitted. Only supported
+with \code{zero.dist = "binomial"} and \code{link = "logit"}.}
 
 \item{spa_cutoff}{Numeric or NULL. When \code{score_test} is used, apply saddlepoint
 approximation (SPA) for p-values when |z| exceeds this cutoff. Default is 2.
@@ -78,8 +78,8 @@ Set to \code{NULL} or \code{Inf} to disable SPA.}
 }
 \value{
 An object of class "fasthurdle" representing the fitted model.
-  When \code{score_test} is used, the \code{$score_test} slot contains the score test
-  results (beta, se, statistic, pvalue).
+  When \code{score_test} is used, \code{$score_test_count} and \code{$score_test_zero}
+  contain the score test results (beta, se, statistic, pvalue) for each component.
 }
 \description{
 Fits hurdle regression models for count data. The hurdle model combines a count data model
@@ -102,24 +102,17 @@ where \eqn{f_{zero}} is the zero hurdle distribution and \eqn{f_{count}} is the 
 
 When \code{score_test} is specified, the full count model is still fitted (unlike
 \code{\link{fast_negbin_hurdle}} which skips the full model for speed). The score test
-results are stored in the \code{$score_test} slot alongside the standard Wald results.
-This allows comparison between the two testing approaches.
+results are stored in the \code{$score_test_count} and \code{$score_test_zero} slots alongside
+the standard Wald results. This allows comparison between the two testing approaches.
 
-The score test is available for all count distributions (negbin, poisson, geometric)
-and is especially recommended when:
-\itemize{
-  \item Using the NB count model with positive counts that are approximately Poisson
-    (theta poorly identified), which causes tail-heavy Wald p-value inflation
-    (up to 11x at alpha = 0.001).
-  \item Using the Poisson count model but the data has genuine overdispersion (e.g.,
-    from donor-level clustering), which causes severe Wald inflation (up to 4x at
-    alpha = 0.05).
-}
+The count score test is available for all count distributions (negbin, poisson, geometric).
+The zero score test is available for binomial/logit only. Both are especially recommended
+for high-throughput testing where caching the null models gives large speedups.
 
-The score test p-value uses SPA with a closed-form zero-truncated NB cumulant
-generating function for numerically stable tail probabilities at any sample size.
-For significant tests, beta is refined via 5-iteration BFGS from the score estimate
-(within ~1\% of the full MLE). SE is back-computed from the p-value for consistency.
+SPA uses closed-form cumulant generating functions (zero-truncated NB for count, binomial
+for zero) for numerically stable tail probabilities at any sample size. For significant
+tests, beta is refined via 5-iteration BFGS from the score estimate (within ~1\% of the
+full MLE). SE is back-computed from the p-value for consistency.
 }
 \examples{
 \dontrun{

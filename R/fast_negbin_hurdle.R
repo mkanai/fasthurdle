@@ -13,17 +13,16 @@
 #' @param method Optimization method used by optim. Default is "BFGS".
 #' @param maxit Maximum number of iterations. Default is 10000.
 #' @param separate Logical. If TRUE, count and zero components are estimated separately. Default is TRUE.
-#' @param score_test Optional. Column name(s) or integer index(es) in X to compute
-#'   a score test for in the count component. When specified, the full count model is
-#'   NOT fitted — only the null model (X without the test columns). This is faster
-#'   and gives better-calibrated p-values. See Details and \code{\link{fasthurdle}}
-#'   for background on the score test.
-#' @param null_fit Optional. A pre-fitted null model from \code{\link{fit_null_count}}.
-#'   When provided with \code{score_test}, the null model is not re-fitted. This is
-#'   useful for testing many predictors against the same null (e.g., many peaks per gene).
+#' @param score_test Optional. Column name (character) of the variable to compute score
+#'   tests for in both the count and zero components. When specified, neither the full
+#'   count nor zero model is fitted — only the null models. See Details.
+#' @param null_fit_count Optional. A pre-fitted count null model from \code{\link{fit_null_count}}.
+#'   When provided with \code{score_test}, the count null is not re-fitted.
 #' @param spa_cutoff Numeric or NULL. When \code{score_test} is used, apply saddlepoint
 #'   approximation (SPA) for p-values when |z| exceeds this cutoff. Default is 2.
 #'   Set to \code{NULL} or \code{Inf} to disable SPA.
+#' @param null_fit_zero Optional. A pre-fitted zero null model from \code{\link{fit_null_zero}}.
+#'   When provided with \code{score_test}, the zero null is not re-fitted.
 #' @param compute_fitted Logical. If FALSE (default), skip computing fitted values
 #'   and residuals for speed. Set to TRUE if you need fitted.values, residuals, y, or x
 #'   in the returned object. Not available when \code{score_test} is used.
@@ -35,16 +34,15 @@
 #'
 #' When \code{score_test} is specified, the function operates differently:
 #' \itemize{
-#'   \item The full count model is NOT fitted — only the null model (covariates only).
+#'   \item Neither the full count nor zero model is fitted — only the null models.
+#'   \item Both count and zero components use score tests for the test variable.
 #'   \item For significant tests (|z| > \code{spa_cutoff}), beta is refined via a short
 #'     BFGS optimization from the score estimate (within ~1\% of the full MLE). For
 #'     non-significant tests, beta uses the ratio estimator (approximate).
 #'   \item Covariate coefficients are the null model MLEs (valid under H0).
-#'   \item \code{loglik} is the null model's log-likelihood, not the full model's.
-#'   \item \code{vcov} contains the null model's covariance for covariates and the
-#'     score-based variance for the test variable. Cross-covariances are NA.
-#'   \item \code{AIC()} and \code{BIC()} reflect the null model.
-#'   \item \code{theta} is estimated from the null model.
+#'   \item \code{loglik} is the null models' log-likelihood, not the full model's.
+#'   \item \code{vcov} has NA for covariate SEs; score-based SE for the test variable.
+#'   \item \code{theta} is estimated from the count null model.
 #'   \item \code{compute_fitted} is not available (fitted values require the full model).
 #' }
 #'
@@ -67,15 +65,17 @@
 #'
 #' # High-throughput: cache null model, test many variables
 #' X_null <- model.matrix(~ fem + mar + kid5 + phd, data = bioChemists)
-#' null_fit <- fit_null_count(X_null, y, dist = "negbin")
-#' m <- fast_negbin_hurdle(X, y, score_test = "ment", null_fit = null_fit)
+#' null_fit_count <- fit_null_count(X_null, y, dist = "negbin")
+#' m <- fast_negbin_hurdle(X, y, score_test = "ment", null_fit_count = null_fit_count)
 #' summary(m)
 #' }
 #'
 #' @export
 fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL,
                                method = "BFGS", maxit = 10000, separate = TRUE,
-                               score_test = NULL, null_fit = NULL, spa_cutoff = 2,
+                               score_test = NULL,
+                               null_fit_count = NULL, null_fit_zero = NULL,
+                               spa_cutoff = 2,
                                compute_fitted = FALSE) {
   # Fixed parameters
   dist <- "negbin"
@@ -129,8 +129,8 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL,
     x_test <- X[, test_idx, drop = FALSE]
 
     # Fit or reuse null model
-    if (is.null(null_fit)) {
-      null_fit <- fit_null_count(X_null, y,
+    if (is.null(null_fit_count)) {
+      null_fit_count <- fit_null_count(X_null, y,
         offsetx = offsetx, weights = weights,
         dist = "negbin", method = method, maxit = maxit
       )
@@ -140,31 +140,31 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL,
     st_result <- score_test_count(
       X_null, x_test, y,
       offsetx = offsetx, weights = weights,
-      dist = "negbin", null_fit = null_fit, spa_cutoff = spa_cutoff
+      dist = "negbin", null_fit_count = null_fit_count, spa_cutoff = spa_cutoff
     )
 
     # Build count coefficients: null MLE for covariates, score for test
     kx_null <- length(null_idx)
     coefc <- numeric(kx)
-    coefc[null_idx] <- null_fit$par[seq_len(kx_null)]
+    coefc[null_idx] <- null_fit_count$par[seq_len(kx_null)]
     coefc[test_idx] <- st_result$beta
 
     # Theta from null model
-    theta <- c(count = as.vector(exp(null_fit$par[kx_null + 1])))
+    theta <- c(count = as.vector(exp(null_fit_count$par[kx_null + 1])))
     SE.logtheta <- c(count = NA_real_)
 
     # Use null model loglik (covariate vcov is NA in score test mode)
-    null_loglik <- null_fit$value
+    null_loglik <- null_fit_count$value
     vc_count <- matrix(NA_real_, kx, kx)
     for (j in seq_along(test_idx)) {
       vc_count[test_idx[j], test_idx[j]] <- st_result$se[j]^2
     }
 
     fit <- list(
-      count = list(par = null_fit$par, convergence = null_fit$convergence),
+      count = list(par = null_fit_count$par, convergence = null_fit_count$convergence),
       zero = NULL
     )
-    converged_count <- null_fit$convergence == 0
+    converged_count <- null_fit_count$convergence == 0
   } else {
     # --- Standard Wald mode: fit full count model ---
     pos_idx <- y > 0
@@ -251,7 +251,42 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL,
   # ====================================================================
   # Zero component estimation (always Wald)
   # ====================================================================
-  if (is.null(fit$zero)) {
+  # ====================================================================
+  # Zero component: score test or Wald
+  # ====================================================================
+  st_result_zero <- NULL
+  if (!is.null(test_idx) && score_test %in% colnames(Z)) {
+    # --- Zero score test mode ---
+    zero_test_idx <- match(score_test, colnames(Z))
+    zero_null_idx <- setdiff(seq_len(kz), zero_test_idx)
+    Z_null_zero <- Z[, zero_null_idx, drop = FALSE]
+    z_test_col <- Z[, zero_test_idx, drop = FALSE]
+
+    if (is.null(null_fit_zero)) {
+      null_fit_zero <- fit_null_zero(Z_null_zero, y,
+        offsetz = offsetz, weights = weights,
+        method = method, maxit = maxit
+      )
+    }
+
+    st_result_zero <- score_test_zero(
+      Z_null_zero, z_test_col, y,
+      offsetz = offsetz, weights = weights,
+      null_fit_zero = null_fit_zero, spa_cutoff = spa_cutoff
+    )
+
+    kz_null_zero <- length(zero_null_idx)
+    coefz <- numeric(kz)
+    coefz[zero_null_idx] <- null_fit_zero$par[seq_len(kz_null_zero)]
+    coefz[zero_test_idx] <- st_result_zero$beta
+
+    null_loglik_zero <- null_fit_zero$value
+    vc_zero <- matrix(NA_real_, kz, kz)
+    vc_zero[zero_test_idx, zero_test_idx] <- st_result_zero$se^2
+
+    fit$zero <- list(convergence = null_fit_zero$convergence)
+  } else if (is.null(fit$zero)) {
+    # --- Wald mode ---
     model_zero_start <- tryCatch(
       suppressWarnings(fastglm::fastglm(
         Z, as.integer(y > 0),
@@ -275,11 +310,13 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL,
   }
 
   if (!is.null(fit$joint)) {
-    # Joint mode: extract zero coefs from joint fit (already computed as coefz_joint)
     coefz <- coefz_joint
     vc_zero <- vc_joint[(kx + 1):(kx + kz), (kx + 1):(kx + kz), drop = FALSE]
-  } else {
+    null_loglik_zero <- NULL
+  } else if (is.null(st_result_zero)) {
+    # Wald path
     coefz <- fit$zero$par[1:kz]
+    null_loglik_zero <- NULL
     vc_zero <- tryCatch(solve(as.matrix(fit$zero$hessian)),
       error = function(e) {
         warning(e$message, call. = FALSE)
@@ -316,13 +353,17 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL,
 
   # loglik
   if (!is.null(test_idx)) {
-    loglik <- null_loglik + fit$zero$value
+    zero_ll <- if (!is.null(null_loglik_zero)) null_loglik_zero else fit$zero$value
+    loglik <- null_loglik + zero_ll
   } else if (separate) {
     loglik <- null_loglik + fit$zero$value
   }
   # (joint mode loglik already set above)
 
+  # Check convergence: null models + score test results (NA = failure)
   converged <- converged_count & (fit$zero$convergence < 1)
+  if (!is.null(st_result) && any(is.na(st_result$pvalue))) converged <- FALSE
+  if (!is.null(st_result_zero) && any(is.na(st_result_zero$pvalue))) converged <- FALSE
 
   # Fitted values
   Yhat <- res <- NULL
@@ -352,7 +393,12 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL,
     ),
     n = nobs,
     df.null = nobs - 2,
-    df.residual = if (!is.null(test_idx)) nobs - (length(null_idx) + kz + 1) else nobs - (kx + kz + 1),
+    df.residual = if (!is.null(test_idx)) {
+      kz_null_used <- if (!is.null(st_result_zero)) length(zero_null_idx) else kz
+      nobs - (length(null_idx) + kz_null_used + 1)
+    } else {
+      nobs - (kx + kz + 1)
+    },
     theta = theta,
     SE.logtheta = SE.logtheta,
     loglik = loglik,
@@ -361,7 +407,8 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL,
     link = linkstr,
     linkinv = linkinv,
     separate = if (!is.null(fit$joint)) FALSE else TRUE,
-    score_test = st_result,
+    score_test_count = st_result,
+    score_test_zero = st_result_zero,
     converged = converged,
     call = match.call(),
     y = if (compute_fitted) y else NULL,

@@ -41,6 +41,10 @@ score_test_count_cpp <- function(null_par, Y, X_null, X_full, offsetx, weights, 
     .Call(`_fasthurdle_score_test_count_cpp`, null_par, Y, X_null, X_full, offsetx, weights, dist, use_spa, spa_cutoff)
 }
 
+score_test_zero_cpp <- function(null_par, Y, Z_null, Z_full, offsetz, weights, use_spa = FALSE, spa_cutoff = 2.0) {
+    .Call(`_fasthurdle_score_test_zero_cpp`, null_par, Y, Z_null, Z_full, offsetz, weights, use_spa, spa_cutoff)
+}
+
 compute_negbin_hurdle_fitted_cpp <- function(coefc, coefz, X, Z, offsetx, offsetz, theta, y) {
     .Call(`_fasthurdle_compute_negbin_hurdle_fitted_cpp`, coefc, coefz, X, Z, offsetx, offsetz, theta, y)
 }

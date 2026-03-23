@@ -1450,7 +1450,18 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
   arma::mat I_nn = fim(null_idx, null_idx);
   arma::mat I_nt = fim(null_idx, test_idx);
   arma::mat I_tt = fim(test_idx, test_idx);
-  arma::mat I_test = I_tt - I_nt.t() * arma::solve(I_nn, I_nt);
+
+  // Guard solve for singular I_nn (computation failure → return NA)
+  arma::mat I_nn_inv_Int;
+  bool count_solve_ok = arma::solve(I_nn_inv_Int, I_nn, I_nt);
+  if (!count_solve_ok) {
+    return Rcpp::List::create(
+        Rcpp::Named("beta") = arma::vec(n_test, arma::fill::value(NA_REAL)),
+        Rcpp::Named("se") = arma::vec(n_test, arma::fill::value(NA_REAL)),
+        Rcpp::Named("statistic") = NA_REAL, Rcpp::Named("pvalue") = NA_REAL,
+        Rcpp::Named("spa_applied") = false);
+  }
+  arma::mat I_test = I_tt - I_nt.t() * I_nn_inv_Int;
 
   // Score test statistic: T = U' I_eff^{-1} U ~ chi2(n_test)
   double T_stat;
@@ -1583,6 +1594,264 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
 
   return Rcpp::List::create(
       Rcpp::Named("beta") = beta_hat, Rcpp::Named("se") = se_hat,
+      Rcpp::Named("statistic") = T_stat, Rcpp::Named("pvalue") = pvalue,
+      Rcpp::Named("spa_applied") = spa_applied);
+}
+
+// ==========================================================================
+// Score test for zero (binomial/logit) component
+// ==========================================================================
+
+// Binomial SPA: per-observation cache (closed-form, logit only)
+struct BinomCgfObsCache {
+  double pi;  // logistic(eta_null)
+  double gi;  // covariate-projected test variable
+  double wi;  // weight
+};
+
+// Mean-centered binomial CGF: K_i(t) = -p*g*t + log(1-p + p*exp(g*t))
+struct BinomCgfResult {
+  double K, K1, K2;
+};
+
+BinomCgfResult compute_binom_cgf(double t,
+                                 const std::vector<BinomCgfObsCache> &cache) {
+  BinomCgfResult result = {0.0, 0.0, 0.0};
+  for (const auto &obs : cache) {
+    double gt = obs.gi * t;
+    double egt = std::exp(gt);
+    double denom = 1.0 - obs.pi + obs.pi * egt;
+    if (denom < 1e-300) continue;
+
+    double K_i = -obs.pi * obs.gi * t + std::log(denom);
+    double p_egt_over_denom = obs.pi * egt / denom;
+    double K1_i = obs.gi * (p_egt_over_denom - obs.pi);
+    double K2_i =
+        obs.pi * (1.0 - obs.pi) * obs.gi * obs.gi * egt / (denom * denom);
+
+    result.K += obs.wi * K_i;
+    result.K1 += obs.wi * K1_i;
+    result.K2 += obs.wi * K2_i;
+  }
+  return result;
+}
+
+// Binomial saddlepoint solver (same Newton + bisection as count)
+SaddlepointResult find_saddlepoint_binom(
+    double q, const std::vector<BinomCgfObsCache> &cache, double tol = 1e-8,
+    int maxiter = 100) {
+  SaddlepointResult res = {0.0, false};
+  double t = 0.0;
+
+  auto cgf = compute_binom_cgf(t, cache);
+  double K1_eval = cgf.K1 - q;
+  double K2_eval = cgf.K2;
+  double prev_jump = std::numeric_limits<double>::infinity();
+
+  for (int iter = 0; iter < maxiter; iter++) {
+    if (K2_eval < 1e-20) K2_eval = 1e-20;
+    double tnew = t - K1_eval / K2_eval;
+
+    if (std::abs(tnew - t) < tol) {
+      res.zeta = tnew;
+      res.converged = true;
+      return res;
+    }
+
+    cgf = compute_binom_cgf(tnew, cache);
+    double new_K1 = cgf.K1 - q;
+
+    if (std::isnan(tnew) || std::isnan(new_K1)) break;
+
+    if ((K1_eval > 0) != (new_K1 > 0)) {
+      if (std::abs(tnew - t) > (prev_jump - tol)) {
+        tnew = t + ((new_K1 > K1_eval) ? 1.0 : -1.0) * prev_jump / 2.0;
+        cgf = compute_binom_cgf(tnew, cache);
+        new_K1 = cgf.K1 - q;
+        prev_jump = prev_jump / 2.0;
+      } else {
+        prev_jump = std::abs(tnew - t);
+      }
+    }
+
+    t = tnew;
+    K1_eval = new_K1;
+    K2_eval = cgf.K2;
+  }
+
+  res.zeta = t;
+  res.converged = false;
+  return res;
+}
+
+double spa_pvalue_one_tail_binom(double zeta, double q,
+                                 const std::vector<BinomCgfObsCache> &cache) {
+  auto cgf = compute_binom_cgf(zeta, cache);
+  double temp1 = zeta * q - cgf.K;
+  if (!std::isfinite(cgf.K) || !std::isfinite(cgf.K2) || temp1 < 0 ||
+      cgf.K2 < 0) {
+    return -1.0;
+  }
+  double w = (zeta > 0 ? 1.0 : -1.0) * std::sqrt(2.0 * temp1);
+  double v = zeta * std::sqrt(cgf.K2);
+  if (std::abs(w) < 1e-15) return -1.0;
+  double z_spa = w + (1.0 / w) * std::log(v / w);
+  if (std::isnan(z_spa)) return -1.0;
+  if (z_spa > 0) {
+    return R::pnorm(z_spa, 0.0, 1.0, 0, 0);
+  } else {
+    return R::pnorm(z_spa, 0.0, 1.0, 1, 0);
+  }
+}
+
+double spa_pvalue_twosided_binom(double q, double pval_nospa,
+                                 const std::vector<BinomCgfObsCache> &cache,
+                                 double tol = 1e-8) {
+  auto sp1 = find_saddlepoint_binom(q, cache, tol);
+  auto sp2 = find_saddlepoint_binom(-q, cache, tol);
+  if (!sp1.converged || !sp2.converged) return pval_nospa;
+  double p1 = spa_pvalue_one_tail_binom(sp1.zeta, q, cache);
+  double p2 = spa_pvalue_one_tail_binom(sp2.zeta, -q, cache);
+  if (p1 < 0 || p2 < 0) return pval_nospa;
+  return std::abs(p1) + std::abs(p2);
+}
+
+// [[Rcpp::export]]
+Rcpp::List score_test_zero_cpp(const arma::vec &null_par, const arma::vec &Y,
+                               const arma::mat &Z_null, const arma::mat &Z_full,
+                               const arma::vec &offsetz,
+                               const arma::vec &weights, bool use_spa = false,
+                               double spa_cutoff = 2.0) {
+  int kz_null = Z_null.n_cols;
+  int kz_full = Z_full.n_cols;
+  int n = Y.n_elem;
+
+  // Require at least one null covariate (intercept)
+  if (kz_null < 1) {
+    Rcpp::stop("Z_null must have at least one column (intercept)");
+  }
+
+  // Binary response
+  arma::vec y_bin(n);
+  for (int i = 0; i < n; i++) y_bin(i) = (Y(i) > 0) ? 1.0 : 0.0;
+
+  // Null fitted values: eta = Z_null * beta + offset, p = logistic(eta)
+  arma::vec eta_null = Z_null * null_par + offsetz;
+  arma::vec p_null = 1.0 / (1.0 + arma::exp(-eta_null));
+
+  // Score for the test variable: U = Σ w * (y_bin - p) * z_test
+  // Use the full Z matrix to include the test column
+  arma::vec residuals = y_bin - p_null;
+  arma::vec z_test = Z_full.col(kz_null);  // test column is at position kz_null
+  double U_test = arma::dot(weights % residuals, z_test);
+
+  // FIM: Z_full' diag(w * p * (1-p)) Z_full
+  arma::vec W_diag = weights % p_null % (1.0 - p_null);
+  arma::mat Z_weighted = Z_full.each_col() % W_diag;
+  arma::mat fim = Z_full.t() * Z_weighted;
+
+  // Schur complement: project out null covariates
+  arma::mat I_nn = fim.submat(0, 0, kz_null - 1, kz_null - 1);
+  arma::mat I_nt = fim.submat(0, kz_null, kz_null - 1, kz_full - 1);
+  arma::mat I_tt = fim.submat(kz_null, kz_null, kz_full - 1, kz_full - 1);
+
+  // Guard solve() for singular/ill-conditioned I_nn
+  // Computation failures return NA (matching Wald behavior for pipeline
+  // robustness)
+  arma::mat I_nn_inv_Int;
+  bool solve_ok = arma::solve(I_nn_inv_Int, I_nn, I_nt);
+  if (!solve_ok) {
+    return Rcpp::List::create(
+        Rcpp::Named("beta") = Rcpp::NumericVector::create(NA_REAL),
+        Rcpp::Named("se") = Rcpp::NumericVector::create(NA_REAL),
+        Rcpp::Named("statistic") = NA_REAL, Rcpp::Named("pvalue") = NA_REAL,
+        Rcpp::Named("spa_applied") = false);
+  }
+  arma::mat I_test = I_tt - I_nt.t() * I_nn_inv_Int;
+
+  double I_val = I_test(0, 0);
+  if (I_val <= 0 || !std::isfinite(I_val)) {
+    return Rcpp::List::create(
+        Rcpp::Named("beta") = Rcpp::NumericVector::create(NA_REAL),
+        Rcpp::Named("se") = Rcpp::NumericVector::create(NA_REAL),
+        Rcpp::Named("statistic") = NA_REAL, Rcpp::Named("pvalue") = NA_REAL,
+        Rcpp::Named("spa_applied") = false);
+  }
+
+  double T_stat = U_test * U_test / I_val;
+  double beta_hat = U_test / I_val;
+  double pvalue = R::pchisq(T_stat, 1.0, 0, 0);
+
+  // SPA
+  bool spa_applied = false;
+  if (use_spa && std::sqrt(T_stat) > spa_cutoff) {
+    // Covariate-projected test variable
+    arma::vec proj_coef = arma::solve(I_nn, I_nt.col(0));
+    arma::vec g_tilde =
+        Z_full.col(kz_null) - Z_full.cols(0, kz_null - 1) * proj_coef;
+
+    // Build binomial CGF cache
+    std::vector<BinomCgfObsCache> cgf_cache;
+    cgf_cache.reserve(n);
+    for (int i = 0; i < n; i++) {
+      double gi = g_tilde(i);
+      if (std::abs(gi) < 1e-15) continue;
+      double pi = p_null(i);
+      if (pi < 1e-15 || pi > 1.0 - 1e-15) continue;
+      BinomCgfObsCache obs;
+      obs.pi = pi;
+      obs.gi = gi;
+      obs.wi = weights(i);
+      cgf_cache.push_back(obs);
+    }
+
+    // U_test = Σ w*(y-p)*g_tilde is already the centered score.
+    // The CGF is mean-centered (K'(0)=0), so pass U_test directly.
+    if (!cgf_cache.empty()) {
+      double p_spa = spa_pvalue_twosided_binom(U_test, pvalue, cgf_cache);
+      if (p_spa >= 0 && p_spa <= 1.0) {
+        pvalue = p_spa;
+        spa_applied = true;
+      }
+    }
+  }
+
+  // Beta refinement: 5-iter BFGS for significant tests
+  if (spa_applied) {
+    arma::vec start_refine(kz_full);
+    start_refine.subvec(0, kz_null - 1) = null_par;
+    start_refine(kz_null) = beta_hat;
+
+    ZeroBinomFunctor refine_functor(Y, Z_full, offsetz, weights, "logit");
+    double obj_before = refine_functor(start_refine);
+
+    arma::vec par = start_refine;
+    Roptim<ZeroBinomFunctor> opt("BFGS");
+    opt.control.trace = 0;
+    opt.control.maxit = 5;
+    opt.set_hessian(false);
+    opt.minimize(refine_functor, par);
+
+    double obj_after = opt.value();
+    double beta_refined = opt.par()(kz_null);
+    if (std::isfinite(beta_refined) && std::isfinite(obj_after) &&
+        obj_after <= obj_before) {
+      beta_hat = beta_refined;
+    }
+  }
+
+  // SE: back-computed from p-value
+  double se_hat;
+  if (pvalue > 0.0 && pvalue < 1.0) {
+    double z_abs = R::qnorm(pvalue / 2.0, 0.0, 1.0, 0, 0);
+    se_hat = std::abs(beta_hat) / z_abs;
+  } else {
+    se_hat = (pvalue == 0.0) ? 0.0 : R_PosInf;
+  }
+
+  return Rcpp::List::create(
+      Rcpp::Named("beta") = Rcpp::NumericVector::create(beta_hat),
+      Rcpp::Named("se") = Rcpp::NumericVector::create(se_hat),
       Rcpp::Named("statistic") = T_stat, Rcpp::Named("pvalue") = pvalue,
       Rcpp::Named("spa_applied") = spa_applied);
 }

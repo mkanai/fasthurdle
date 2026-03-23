@@ -11,7 +11,7 @@ score_test_count(
   offsetx = NULL,
   weights = NULL,
   dist = c("negbin", "poisson", "geometric"),
-  null_fit = NULL,
+  null_fit_count = NULL,
   spa_cutoff = 2,
   method = "BFGS",
   maxit = 10000
@@ -30,17 +30,17 @@ score_test_count(
 
 \item{dist}{Count distribution: "negbin", "poisson", or "geometric".}
 
-\item{null_fit}{Optional. A pre-fitted null model from \code{\link{fit_null_count}}.
+\item{null_fit_count}{Optional. A pre-fitted null model from \code{\link{fit_null_count}}.
 If provided, the null model is not re-fitted, saving computation time.}
 
 \item{spa_cutoff}{Numeric or NULL. Apply saddlepoint approximation (SPA) for
 p-values when |z| exceeds this cutoff. Default is 2. Set to \code{NULL} or
 \code{Inf} to disable SPA.}
 
-\item{method}{Optimization method for fitting the null model (ignored if null_fit
+\item{method}{Optimization method for fitting the null model (ignored if null_fit_count
 is provided). Default is "BFGS".}
 
-\item{maxit}{Maximum iterations for the null model (ignored if null_fit is provided).
+\item{maxit}{Maximum iterations for the null model (ignored if null_fit_count is provided).
 Default is 10000.}
 }
 \value{
@@ -66,9 +66,9 @@ MLE, avoiding the beta-theta confounding that can inflate NB Wald tests.
 result <- score_test_count(X_null, x_test, y, dist = "negbin")
 
 # With cached null model (for testing many x_test variables)
-null_fit <- fit_null_count(X_null, y, dist = "negbin")
-result1 <- score_test_count(X_null, x_test1, y, null_fit = null_fit)
-result2 <- score_test_count(X_null, x_test2, y, null_fit = null_fit)
+null_fit_count <- fit_null_count(X_null, y, dist = "negbin")
+result1 <- score_test_count(X_null, x_test1, y, null_fit_count = null_fit_count)
+result2 <- score_test_count(X_null, x_test2, y, null_fit_count = null_fit_count)
 }
 
 }

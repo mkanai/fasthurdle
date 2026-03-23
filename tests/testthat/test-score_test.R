@@ -192,7 +192,7 @@ test_that("fit_null_count returns correct class and cached null is reproducible"
   r1 <- score_test_count(d$X_null, d$x, d$y, dist = "negbin", spa_cutoff = NULL)
   r2 <- score_test_count(d$X_null, d$x, d$y,
     dist = "negbin",
-    null_fit = nf, spa_cutoff = NULL
+    null_fit_count = nf, spa_cutoff = NULL
   )
   expect_equal(r1$pvalue, r2$pvalue)
   expect_equal(r1$beta, r2$beta)
@@ -227,13 +227,13 @@ test_that("fast_negbin_hurdle score_test mode returns valid summary", {
   )
 })
 
-test_that("fast_negbin_hurdle accepts cached null_fit", {
+test_that("fast_negbin_hurdle accepts cached null_fit_count", {
   d <- gen_data(500, beta_x = 0.3)
   X_full <- cbind(d$X_null, d$x)
   colnames(X_full) <- c("(Intercept)", "x")
   nf <- fit_null_count(d$X_null, d$y, dist = "negbin")
-  m <- fast_negbin_hurdle(X_full, d$y, score_test = "x", null_fit = nf)
-  expect_true(m$score_test$pvalue < 0.05)
+  m <- fast_negbin_hurdle(X_full, d$y, score_test = "x", null_fit_count = nf)
+  expect_true(m$score_test_count$pvalue < 0.05)
   expect_true(m$converged)
 })
 
@@ -245,8 +245,8 @@ test_that("fasthurdle score_test works via formula", {
     x = rnorm(n)
   )
   m <- fasthurdle(y ~ x, data = df, dist = "negbin", score_test = "x")
-  expect_true(!is.null(m$score_test))
-  expect_length(m$score_test$beta, 1)
+  expect_true(!is.null(m$score_test_count))
+  expect_length(m$score_test_count$beta, 1)
 })
 
 # ==========================================================================
@@ -284,4 +284,94 @@ test_that("score_test column not found gives clear error", {
     fast_negbin_hurdle(X_full, d$y, score_test = "nonexistent"),
     "score_test column"
   )
+})
+
+# ==========================================================================
+# Zero model score test
+# ==========================================================================
+
+test_that("score_test_zero works and matches Wald", {
+  set.seed(42)
+  n <- 2000
+  x <- rpois(n, 0.5)
+  cov1 <- rnorm(n)
+  y <- rbinom(n, 1, plogis(0.5 + 0.3 * x - 0.2 * cov1)) *
+    rnbinom(n, size = 2, mu = exp(0.5 + 0.3 * x))
+
+  Z_null <- cbind(1, cov1)
+  colnames(Z_null) <- c("(Intercept)", "cov1")
+  Z_full <- cbind(Z_null, x)
+  colnames(Z_full) <- c("(Intercept)", "cov1", "x")
+
+  # Score test
+  r <- score_test_zero(Z_null, x, y, spa_cutoff = NULL)
+  expect_true(r$pvalue < 0.05)
+  expect_length(r$beta, 1)
+  expect_true(r$se[1] > 0)
+
+  # Wald comparison
+  X_full <- cbind(1, x, cov1)
+  colnames(X_full) <- c("(Intercept)", "x", "cov1")
+  m <- fast_negbin_hurdle(X_full, y, Z = Z_full)
+  wald_beta <- summary(m)$coefficients$zero["x", "Estimate"]
+  # Score beta within 15% of Wald (ratio estimator for logit)
+  expect_equal(r$beta[1], wald_beta, tolerance = 0.15)
+})
+
+test_that("fit_null_zero returns correct class", {
+  set.seed(42)
+  n <- 500
+  y <- rbinom(n, 1, 0.3) * rpois(n, 2)
+  Z_null <- matrix(1, n, 1)
+  colnames(Z_null) <- "(Intercept)"
+  nfz <- fit_null_zero(Z_null, y)
+  expect_s3_class(nfz, "fasthurdle_null_zero")
+  expect_equal(nfz$convergence, 0L)
+  expect_equal(nfz$link, "logit")
+})
+
+test_that("fast_negbin_hurdle with null_fit_zero caches both models", {
+  set.seed(42)
+  n <- 1000
+  peak_acc <- rpois(n, 0.5)
+  pct_mito <- runif(n, 0, 0.2)
+  log_tc <- rnorm(n, 8, 0.3)
+  mu <- exp(-7 + 0.3 * peak_acc - 0.5 * pct_mito + log_tc)
+  y <- rbinom(n, 1, plogis(0.5 + 0.2 * peak_acc)) * rnbinom(n, size = 2, mu = mu)
+
+  X <- cbind(1, peak_acc, pct_mito)
+  colnames(X) <- c("(Intercept)", "peak_acc", "pct_mito")
+  Z <- cbind(1, peak_acc, log_tc, pct_mito)
+  colnames(Z) <- c("(Intercept)", "peak_acc", "log_total_counts", "pct_mito")
+  X_null <- X[, c(1, 3), drop = FALSE]
+  Z_null <- Z[, c(1, 3, 4), drop = FALSE]
+
+  nf <- fit_null_count(X_null, y, offsetx = log_tc, dist = "negbin")
+  nfz <- fit_null_zero(Z_null, y)
+  m <- fast_negbin_hurdle(X, y,
+    Z = Z, offsetx = log_tc,
+    score_test = "peak_acc", null_fit_count = nf, null_fit_zero = nfz
+  )
+
+  s <- summary(m)
+  # Both count and zero have score test results
+  expect_true(!is.na(s$coefficients$count["peak_acc", "Pr(>|z|)"]))
+  expect_true(!is.na(s$coefficients$zero["peak_acc", "Pr(>|z|)"]))
+  # Covariates have NA SE (null model only)
+  expect_true(is.na(s$coefficients$zero["(Intercept)", "Std. Error"]))
+  # score_test_zero slot exists
+  expect_true(!is.null(m$score_test_zero))
+})
+
+test_that("zero score test z = beta/SE recovers p-value", {
+  set.seed(42)
+  n <- 2000
+  x <- rpois(n, 0.5)
+  y <- rbinom(n, 1, plogis(0.5 + 0.3 * x)) * rnbinom(n, size = 2, mu = exp(0.5))
+  Z_null <- matrix(1, n, 1)
+  colnames(Z_null) <- "(Intercept)"
+
+  r <- score_test_zero(Z_null, x, y, spa_cutoff = NULL)
+  p_from_z <- 2 * pnorm(-abs(r$beta[1] / r$se[1]))
+  expect_equal(p_from_z, r$pvalue, tolerance = 1e-10)
 })

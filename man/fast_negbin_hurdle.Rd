@@ -14,7 +14,8 @@ fast_negbin_hurdle(
   maxit = 10000,
   separate = TRUE,
   score_test = NULL,
-  null_fit = NULL,
+  null_fit_count = NULL,
+  null_fit_zero = NULL,
   spa_cutoff = 2,
   compute_fitted = FALSE
 )
@@ -36,15 +37,15 @@ fast_negbin_hurdle(
 
 \item{separate}{Logical. If TRUE, count and zero components are estimated separately. Default is TRUE.}
 
-\item{score_test}{Optional. Column name(s) or integer index(es) in X to compute
-a score test for in the count component. When specified, the full count model is
-NOT fitted — only the null model (X without the test columns). This is faster
-and gives better-calibrated p-values. See Details and \code{\link{fasthurdle}}
-for background on the score test.}
+\item{score_test}{Optional. Column name (character) of the variable to compute score
+tests for in both the count and zero components. When specified, neither the full
+count nor zero model is fitted — only the null models. See Details.}
 
-\item{null_fit}{Optional. A pre-fitted null model from \code{\link{fit_null_count}}.
-When provided with \code{score_test}, the null model is not re-fitted. This is
-useful for testing many predictors against the same null (e.g., many peaks per gene).}
+\item{null_fit_count}{Optional. A pre-fitted count null model from \code{\link{fit_null_count}}.
+When provided with \code{score_test}, the count null is not re-fitted.}
+
+\item{null_fit_zero}{Optional. A pre-fitted zero null model from \code{\link{fit_null_zero}}.
+When provided with \code{score_test}, the zero null is not re-fitted.}
 
 \item{spa_cutoff}{Numeric or NULL. When \code{score_test} is used, apply saddlepoint
 approximation (SPA) for p-values when |z| exceeds this cutoff. Default is 2.
@@ -67,16 +68,15 @@ for speed by skipping all unnecessary parameter checks and validations.
 
 When \code{score_test} is specified, the function operates differently:
 \itemize{
-  \item The full count model is NOT fitted — only the null model (covariates only).
+  \item Neither the full count nor zero model is fitted — only the null models.
+  \item Both count and zero components use score tests for the test variable.
   \item For significant tests (|z| > \code{spa_cutoff}), beta is refined via a short
     BFGS optimization from the score estimate (within ~1\% of the full MLE). For
     non-significant tests, beta uses the ratio estimator (approximate).
   \item Covariate coefficients are the null model MLEs (valid under H0).
-  \item \code{loglik} is the null model's log-likelihood, not the full model's.
-  \item \code{vcov} contains the null model's covariance for covariates and the
-    score-based variance for the test variable. Cross-covariances are NA.
-  \item \code{AIC()} and \code{BIC()} reflect the null model.
-  \item \code{theta} is estimated from the null model.
+  \item \code{loglik} is the null models' log-likelihood, not the full model's.
+  \item \code{vcov} has NA for covariate SEs; score-based SE for the test variable.
+  \item \code{theta} is estimated from the count null model.
   \item \code{compute_fitted} is not available (fitted values require the full model).
 }
 }
@@ -99,8 +99,8 @@ summary(m)
 
 # High-throughput: cache null model, test many variables
 X_null <- model.matrix(~ fem + mar + kid5 + phd, data = bioChemists)
-null_fit <- fit_null_count(X_null, y, dist = "negbin")
-m <- fast_negbin_hurdle(X, y, score_test = "ment", null_fit = null_fit)
+null_fit_count <- fit_null_count(X_null, y, dist = "negbin")
+m <- fast_negbin_hurdle(X, y, score_test = "ment", null_fit_count = null_fit_count)
 summary(m)
 }
 

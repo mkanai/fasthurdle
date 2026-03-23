@@ -72,7 +72,7 @@ summary(model)
 
 By default, `fasthurdle` uses the **Wald test** for inference, same as `pscl::hurdle`. The **score test** is an alternative that evaluates significance at the null model — it does not fit the full count model, making it both faster (~2x) and better calibrated. The score test is available for all count distributions (negbin, poisson, geometric) and is especially recommended for the NB count model, where the Wald test can produce inflated p-values when the dispersion parameter θ is poorly identified.
 
-With `score_test`, the count component uses a score test for the specified variable, while the zero component remains unchanged (Wald). A saddlepoint approximation (SPA) using a closed-form zero-truncated NB cumulant generating function is applied for accurate tail p-values (on by default, `spa_cutoff = 2`). For significant tests, beta is refined via a short BFGS optimization from the score estimate, giving accuracy within ~1% of the full MLE. The `summary()` output format is unchanged.
+With `score_test`, both the count and zero components use score tests for the specified variable. SPA is applied using closed-form cumulant generating functions (zero-truncated NB for count, binomial for zero) for accurate tail p-values (on by default, `spa_cutoff = 2`). For significant tests, beta is refined via a short BFGS optimization from the score estimate, giving accuracy within ~1% of the full MLE. The `summary()` output format is unchanged.
 
 ```r
 # Wald (default)
@@ -139,28 +139,34 @@ model <- fast_negbin_hurdle(X, y, Z = Z, offsetx = offsetx)
 
 ### Score test (recommended)
 
-The score test with SPA gives better-calibrated p-values for the count component and is ~2x faster. Just add `score_test`:
+The score test with SPA gives better-calibrated p-values and is faster. Just add `score_test`:
 
 ```r
 model <- fast_negbin_hurdle(X, y, Z = Z, offsetx = offsetx, score_test = "peak_acc")
 s <- summary(model)
 s$coefficients$count["peak_acc", ]  # Score test: beta, SE, z, p-value
-s$coefficients$zero["peak_acc", ]   # Zero (Wald, unchanged)
+s$coefficients$zero["peak_acc", ]   # Score test: beta, SE, z, p-value
 ```
 
-For high-throughput testing (many peaks per gene), the null model can be fitted once and reused:
+For high-throughput testing (many peaks per gene), both null models can be fitted once and reused:
 
 ```r
-# Fit null once per gene (covariates only, no peak_acc)
+# Fit nulls once per gene (covariates only, no peak_acc)
 X_null <- model.matrix(~ pct_counts_mito, data = df)
-null_fit <- fit_null_count(X_null, y, offsetx = offsetx, dist = "negbin")
+Z_null <- model.matrix(~ log_total_counts + pct_counts_mito, data = df)
+null_fit_count <- fit_null_count(X_null, y, offsetx = offsetx, dist = "negbin")
+null_fit_zero <- fit_null_zero(Z_null, y)
 
-# Test each peak against the cached null
+# Test each peak against cached nulls
 for (peak in peaks) {
   X <- cbind(X_null, df[[peak]])
   colnames(X)[ncol(X)] <- peak
+  Z <- cbind(Z_null, df[[peak]])
+  colnames(Z)[ncol(Z)] <- peak
   model <- fast_negbin_hurdle(X, y, Z = Z, offsetx = offsetx,
-                               score_test = peak, null_fit = null_fit)
+                               score_test = peak,
+                               null_fit_count = null_fit_count,
+                               null_fit_zero = null_fit_zero)
   # Extract results from summary(model)
 }
 ```
@@ -204,7 +210,7 @@ The use of hurdle models for peak-gene link analysis in single-nucleus multiome 
 
 ### v1.2.0 (2026-03-21)
 
-- **New feature**: Score test with saddlepoint approximation (SPA) for the count component (`score_test` parameter in `fast_negbin_hurdle()` and `fasthurdle()`). Available for all count distributions; especially recommended for NB where it fixes Wald test tail inflation when θ is poorly identified. SPA uses a closed-form zero-truncated NB cumulant generating function for numerically stable tail p-values at any sample size. Beta for significant tests is refined via 5-iteration BFGS from the score estimate (within ~1% of full MLE). ~2x faster and supports cached null models via `fit_null_count()` for high-throughput testing.
+- **New feature**: Score test with saddlepoint approximation (SPA) for both count and zero components (`score_test` parameter in `fast_negbin_hurdle()` and `fasthurdle()`). SPA uses closed-form cumulant generating functions (zero-truncated NB for count, binomial for zero). Both null models can be cached via `fit_null_count()` and `fit_null_zero()` for high-throughput testing. Beta for significant tests is refined via 5-iteration BFGS (within ~1% of full MLE).
 
 ### v1.1.1 (2026-03-09)
 

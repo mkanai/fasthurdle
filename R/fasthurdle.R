@@ -22,28 +22,26 @@
 #' @param link Character string specifying the link function for the binomial zero hurdle model.
 #'   Currently, "logit", "probit", "cloglog", "cauchit", and "log" are supported.
 #' @param control A list of control parameters passed to the optimizer. See \code{\link{hurdle.control}}.
-#' @param score_test Optional. Column name(s) of the count model variable(s) to compute
-#'   a score test for. The score test evaluates the significance of the test variable(s)
-#'   at the null MLE (without the test variable), giving better-calibrated p-values than
-#'   the Wald test when the NB dispersion parameter theta is poorly identified (e.g.,
-#'   when positive counts are approximately Poisson). For significant tests, beta is
-#'   refined via a short BFGS optimization from the score estimate. See Details.
-#' @param null_fit Optional. A pre-fitted null model from \code{\link{fit_null_count}}.
-#'   When provided with \code{score_test}, the null model is not re-fitted. This is
-#'   useful for testing many predictors against the same null (e.g., many peaks per gene
-#'   in single-cell genomics). The null model can be saved with \code{saveRDS} and
-#'   reloaded for reuse.
+#' @param score_test Optional. Column name of the variable to compute a score test for
+#'   in both the count and zero components. The score test evaluates significance at the
+#'   null MLE, giving better-calibrated p-values and faster computation. For significant
+#'   tests, beta is refined via a short BFGS optimization from the score estimate. See Details.
+#' @param null_fit_count Optional. A pre-fitted count null model from \code{\link{fit_null_count}}.
+#'   When provided with \code{score_test}, the count null is not re-fitted.
 #' @param spa_cutoff Numeric or NULL. When \code{score_test} is used, apply saddlepoint
 #'   approximation (SPA) for p-values when |z| exceeds this cutoff. Default is 2.
 #'   Set to \code{NULL} or \code{Inf} to disable SPA.
+#' @param null_fit_zero Optional. A pre-fitted zero null model from \code{\link{fit_null_zero}}.
+#'   When provided with \code{score_test}, the zero null is not re-fitted. Only supported
+#'   with \code{zero.dist = "binomial"} and \code{link = "logit"}.
 #' @param model Logical. If TRUE, the model frame is included in the returned object.
 #' @param y Logical. If TRUE, the response vector is included in the returned object.
 #' @param x Logical. If TRUE, the model matrices are included in the returned object.
 #' @param ... Additional arguments passed to \code{\link{hurdle.control}}.
 #'
 #' @return An object of class "fasthurdle" representing the fitted model.
-#'   When \code{score_test} is used, the \code{$score_test} slot contains the score test
-#'   results (beta, se, statistic, pvalue).
+#'   When \code{score_test} is used, \code{$score_test_count} and \code{$score_test_zero}
+#'   contain the score test results (beta, se, statistic, pvalue) for each component.
 #'
 #' @details
 #' The hurdle model combines two components: a truncated count component for positive counts
@@ -60,24 +58,17 @@
 #'
 #' When \code{score_test} is specified, the full count model is still fitted (unlike
 #' \code{\link{fast_negbin_hurdle}} which skips the full model for speed). The score test
-#' results are stored in the \code{$score_test} slot alongside the standard Wald results.
-#' This allows comparison between the two testing approaches.
+#' results are stored in the \code{$score_test_count} and \code{$score_test_zero} slots alongside
+#' the standard Wald results. This allows comparison between the two testing approaches.
 #'
-#' The score test is available for all count distributions (negbin, poisson, geometric)
-#' and is especially recommended when:
-#' \itemize{
-#'   \item Using the NB count model with positive counts that are approximately Poisson
-#'     (theta poorly identified), which causes tail-heavy Wald p-value inflation
-#'     (up to 11x at alpha = 0.001).
-#'   \item Using the Poisson count model but the data has genuine overdispersion (e.g.,
-#'     from donor-level clustering), which causes severe Wald inflation (up to 4x at
-#'     alpha = 0.05).
-#' }
+#' The count score test is available for all count distributions (negbin, poisson, geometric).
+#' The zero score test is available for binomial/logit only. Both are especially recommended
+#' for high-throughput testing where caching the null models gives large speedups.
 #'
-#' The score test p-value uses SPA with a closed-form zero-truncated NB cumulant
-#' generating function for numerically stable tail probabilities at any sample size.
-#' For significant tests, beta is refined via 5-iteration BFGS from the score estimate
-#' (within ~1\% of the full MLE). SE is back-computed from the p-value for consistency.
+#' SPA uses closed-form cumulant generating functions (zero-truncated NB for count, binomial
+#' for zero) for numerically stable tail probabilities at any sample size. For significant
+#' tests, beta is refined via 5-iteration BFGS from the score estimate (within ~1\% of the
+#' full MLE). SE is back-computed from the p-value for consistency.
 #'
 #' @examples
 #' \dontrun{
@@ -103,7 +94,9 @@ fasthurdle <- function(formula, data, subset, na.action, weights, offset,
                        zero.dist = c("binomial", "poisson", "negbin", "geometric"),
                        link = c("logit", "probit", "cloglog", "cauchit", "log"),
                        control = hurdle.control(...),
-                       score_test = NULL, null_fit = NULL, spa_cutoff = 2,
+                       score_test = NULL,
+                       null_fit_count = NULL, null_fit_zero = NULL,
+                       spa_cutoff = 2,
                        model = TRUE, y = TRUE, x = FALSE, ...) {
   # Match arguments
   dist <- match.arg(dist)
@@ -244,22 +237,16 @@ fasthurdle <- function(formula, data, subset, na.action, weights, offset,
     dist, zero.dist, theta, linkinv
   )
 
-  # Score test for count component (if requested)
+  # Score test for count and zero components (if requested)
   score_test_result <- NULL
+  score_test_zero_result <- NULL
   if (!is.null(score_test)) {
-    if (length(score_test) > 1) {
-      stop("score_test currently supports only a single test variable")
+    if (!is.character(score_test) || length(score_test) != 1) {
+      stop("score_test must be a single column name (character)")
     }
-    if (is.character(score_test)) {
-      test_idx <- match(score_test, colnames(X))
-      if (any(is.na(test_idx))) {
-        stop(
-          "score_test column(s) not found in X: ",
-          paste(score_test[is.na(test_idx)], collapse = ", ")
-        )
-      }
-    } else {
-      test_idx <- as.integer(score_test)
+    test_idx <- match(score_test, colnames(X))
+    if (is.na(test_idx)) {
+      stop("score_test column '", score_test, "' not found in X")
     }
     null_idx <- setdiff(seq_len(kx), test_idx)
     X_null_st <- X[, null_idx, drop = FALSE]
@@ -267,8 +254,23 @@ fasthurdle <- function(formula, data, subset, na.action, weights, offset,
     score_test_result <- score_test_count(
       X_null_st, x_test_st, Y,
       offsetx = offsetx, weights = weights,
-      dist = dist, null_fit = null_fit, spa_cutoff = spa_cutoff, method = method, maxit = maxit
+      dist = dist, null_fit_count = null_fit_count,
+      spa_cutoff = spa_cutoff, method = method, maxit = maxit
     )
+    # Zero score test (logit/binomial only)
+    if (zero.dist == "binomial" && linkstr == "logit" &&
+        score_test %in% colnames(Z)) {
+      zero_test_idx <- match(score_test, colnames(Z))
+      zero_null_idx <- setdiff(seq_len(kz), zero_test_idx)
+      Z_null_st <- Z[, zero_null_idx, drop = FALSE]
+      z_test_st <- Z[, zero_test_idx, drop = FALSE]
+      score_test_zero_result <- score_test_zero(
+        Z_null_st, z_test_st, Y,
+        offsetz = offsetz, weights = weights,
+        null_fit_zero = null_fit_zero,
+        spa_cutoff = spa_cutoff, method = method, maxit = maxit
+      )
+    }
   }
 
   # Calculate effective observations
@@ -299,7 +301,8 @@ fasthurdle <- function(formula, data, subset, na.action, weights, offset,
     dist = list(count = dist, zero = zero.dist),
     link = if (zero.dist == "binomial") linkstr else NULL,
     linkinv = if (zero.dist == "binomial") linkinv else NULL,
-    score_test = score_test_result,
+    score_test_count = score_test_result,
+    score_test_zero = score_test_zero_result,
     separate = separate,
     converged = fit_result$converged,
     call = cl,
