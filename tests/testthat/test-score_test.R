@@ -386,3 +386,121 @@ test_that("zero score test z = beta/SE recovers p-value", {
   p_from_z <- 2 * pnorm(-abs(r$beta[1] / r$se[1]))
   expect_equal(p_from_z, r$pvalue, tolerance = 1e-10)
 })
+
+# ==========================================================================
+# Model misspecification: spike-at-1 (ambient RNA contamination)
+# ==========================================================================
+
+test_that("observed info score test is calibrated under spike-at-1 misspecification", {
+  # Spike-at-1 model: 50% of "expressed" cells get count=1 (ambient RNA),
+  # rest follow ZTNB. The expected FIM is severely inflated under this
+  # misspecification; the observed Hessian should match Wald calibration.
+  n_sim <- 100
+  n <- 10000
+  pvals_score <- pvals_wald <- numeric(n_sim)
+  for (i in seq_len(n_sim)) {
+    set.seed(i)
+    peak_acc <- rpois(n, 0.5)
+    log_tc <- rnorm(n, 8, 0.3)
+    pct_mito <- runif(n, 0, 0.2)
+    mu <- exp(-7 + 0 * peak_acc - 0.5 * pct_mito + log_tc)
+    p_expr <- plogis(qlogis(0.05) + 0.2 * peak_acc - 0.3 * pct_mito)
+    is_spike <- rbinom(n, 1, 0.5)
+    nb_count <- pmax(rnbinom(n, size = 3, mu = mu), 1L)
+    y <- as.integer(rbinom(n, 1, p_expr) * ifelse(is_spike, 1L, nb_count))
+    X <- model.matrix(~ peak_acc + pct_mito)
+    Z <- model.matrix(~ peak_acc + log_tc + pct_mito)
+    fw <- tryCatch(
+      suppressWarnings(fast_negbin_hurdle(X, y, Z = Z, offsetx = log_tc)),
+      error = function(e) NULL)
+    fs <- tryCatch(
+      suppressWarnings(fast_negbin_hurdle(X, y, Z = Z, offsetx = log_tc,
+                                          score_test = "peak_acc",
+                                          spa_cutoff = NULL)),
+      error = function(e) NULL)
+    pvals_wald[i] <- if (!is.null(fw)) {
+      summary(fw)$coefficients$count["peak_acc", "Pr(>|z|)"]
+    } else NA
+    pvals_score[i] <- if (!is.null(fs)) {
+      summary(fs)$coefficients$count["peak_acc", "Pr(>|z|)"]
+    } else NA
+  }
+  fpr_wald <- mean(pvals_wald[!is.na(pvals_wald)] < 0.05)
+  fpr_score <- mean(pvals_score[!is.na(pvals_score)] < 0.05)
+  # Score FPR should be within 10% of Wald FPR (both may be mildly inflated)
+  expect_true(abs(fpr_score - fpr_wald) < 0.10,
+              info = sprintf("Score FPR=%.3f, Wald FPR=%.3f", fpr_score, fpr_wald))
+  # Neither should be catastrophically inflated (< 25%)
+  expect_true(fpr_score < 0.25,
+              info = sprintf("Score FPR=%.3f too high", fpr_score))
+})
+
+# ==========================================================================
+# Edge cases
+# ==========================================================================
+
+test_that("score test handles small n_pos gracefully", {
+  # Very sparse data: only ~10-20 positive observations
+  set.seed(42)
+  n <- 5000
+  x <- rnorm(n)
+  # Very sparse: ~1% expression
+  y <- rbinom(n, 1, 0.01) * rnbinom(n, size = 2, mu = exp(0.5 + 0.3 * x))
+  X_null <- matrix(1, n, 1)
+  colnames(X_null) <- "(Intercept)"
+  n_pos <- sum(y > 0)
+  # Should have ~50 positive obs at n=5000, 1% expr
+  expect_true(n_pos >= 5)
+  r <- score_test_count(X_null, x, y, dist = "negbin", spa_cutoff = NULL)
+  # Should return a valid result (not error), possibly NA if too few
+  expect_true(is.numeric(r$pvalue))
+  expect_true(is.numeric(r$beta))
+  if (!is.na(r$pvalue)) {
+    expect_true(r$pvalue >= 0 && r$pvalue <= 1)
+  }
+})
+
+test_that("score test handles extreme theta (near-Poisson)", {
+  # theta = 100 → near-Poisson, observed Hessian should still work
+  set.seed(42)
+  n <- 2000
+  x <- rnorm(n)
+  y <- rbinom(n, 1, 0.5) * rnbinom(n, size = 100, mu = exp(0.5 + 0.3 * x))
+  X_null <- matrix(1, n, 1)
+  colnames(X_null) <- "(Intercept)"
+  r <- score_test_count(X_null, x, y, dist = "negbin", spa_cutoff = NULL)
+  expect_true(!is.na(r$pvalue))
+  expect_true(r$pvalue < 0.05)  # true effect, should detect
+  expect_true(r$beta[1] > 0)    # correct sign
+})
+
+test_that("score test handles high overdispersion (theta near 0)", {
+  # theta = 0.1 → very overdispersed, lots of large counts + many 1s
+  set.seed(42)
+  n <- 2000
+  x <- rnorm(n)
+  y <- rbinom(n, 1, 0.3) * rnbinom(n, size = 0.1, mu = exp(0.5 + 0.3 * x))
+  X_null <- matrix(1, n, 1)
+  colnames(X_null) <- "(Intercept)"
+  r <- score_test_count(X_null, x, y, dist = "negbin", spa_cutoff = NULL)
+  expect_true(is.numeric(r$pvalue))
+  if (!is.na(r$pvalue)) {
+    expect_true(r$pvalue >= 0 && r$pvalue <= 1)
+  }
+})
+
+test_that("observed info falls back to expected FIM when Hessian is non-finite", {
+  # Degenerate case: all positive counts are 1 (spike-at-1 with 100% spike)
+  set.seed(42)
+  n <- 500
+  x <- rnorm(n)
+  y <- rbinom(n, 1, 0.3)  # all positives are exactly 1
+  X_null <- matrix(1, n, 1)
+  colnames(X_null) <- "(Intercept)"
+  # Should not error — falls back to expected FIM or returns NA
+  r <- tryCatch(
+    score_test_count(X_null, x, y, dist = "negbin", spa_cutoff = NULL),
+    error = function(e) list(pvalue = NA)
+  )
+  expect_true(is.numeric(r$pvalue))
+})
