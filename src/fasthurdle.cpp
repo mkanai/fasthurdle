@@ -547,7 +547,7 @@ ZtnbFimResult compute_ztnb_observed_hessian_components(
     double eta_i = arma::dot(X_pos.row(i), beta) + offset_pos(i);
     double mu = std::exp(eta_i);
     double y = Y_pos(i);
-    double A = mu + theta;           // A_i = mu_i + theta
+    double A = mu + theta;  // A_i = mu_i + theta
     double A2 = A * A;
     double mu_over_A = mu / A;
     double theta_over_A = theta / A;
@@ -558,7 +558,7 @@ ZtnbFimResult compute_ztnb_observed_hessian_components(
     double p0 = std::exp(log_p0);
     double p1 = 1.0 - p0;
     if (p1 < 1e-300) p1 = 1e-300;
-    double r = p0 / p1;              // r_i = p0/(1-p0)
+    double r = p0 / p1;  // r_i = p0/(1-p0)
 
     // Zero-truncation first derivatives of log(p0) w.r.t. (eta, theta):
     //   a_eta = d(log p0)/d(eta) = -theta*mu/A
@@ -572,7 +572,8 @@ ZtnbFimResult compute_ztnb_observed_hessian_components(
     //            = -theta²*mu/A²
     double a_ee = -theta * theta * mu / A2;
     //   a_eta_theta = d²(log p0)/d(eta)d(theta) = -mu²/A²
-    //              (d/dtheta of -theta*mu/A = -mu/A + theta*mu/A² = -mu²/A²... wait)
+    //              (d/dtheta of -theta*mu/A = -mu/A + theta*mu/A² = -mu²/A²...
+    //              wait)
     //   Actually: a_eta = -theta*mu/A, so
     //   d(a_eta)/d(theta) = -mu/A + theta*mu/A² = -mu(A-theta)/A² = -mu²/A²
     double a_et = -mu * mu / A2;
@@ -596,7 +597,8 @@ ZtnbFimResult compute_ztnb_observed_hessian_components(
     result.v_ee(i) = w_pos(i) * (I_NB_ee + ZT_ee);
 
     // ---- Beta-logtheta weight (w_et) ----
-    // Chain rule: d/d(tau) = theta * d/d(theta), so mixed derivative in (eta, tau):
+    // Chain rule: d/d(tau) = theta * d/d(theta), so mixed derivative in (eta,
+    // tau):
     //   I_obs[eta, tau] = theta * I_obs[eta, theta]
     // I_NB[eta,theta] = mu*(mu-y)/A²
     double I_NB_et = mu * (mu - y) / A2;
@@ -608,8 +610,8 @@ ZtnbFimResult compute_ztnb_observed_hessian_components(
     // ---- Logtheta-logtheta weight (w_tt) ----
     // Chain rule: d²/d(tau)² = theta² * d²/d(theta)² + theta * d/d(theta)
     //
-    // First compute d(logL_NB)/d(theta) / theta = b  (the "first derivative / theta")
-    // Using recurrence for psi(y+theta) - psi(theta):
+    // First compute d(logL_NB)/d(theta) / theta = b  (the "first derivative /
+    // theta") Using recurrence for psi(y+theta) - psi(theta):
     //   digamma_diff = sum_{k=0}^{y-1} 1/(theta+k)
     double digamma_diff = 0.0;
     double trigamma_diff = 0.0;
@@ -631,9 +633,10 @@ ZtnbFimResult compute_ztnb_observed_hessian_components(
 
     // I_NB[theta,theta] = -(b + theta*c)  [negative of d²logL/dtheta²]
     // Wait: d²logL_NB/dtheta² = d/dtheta(theta*b) = b + theta*c
-    // So I_NB[theta,theta] = -(b + theta*c)  ... but we want observed INFO = -d²logL/d·²
-    // Actually: d(logL_NB)/d(theta) = theta * b (approximately, from the structure)
-    // Let me be precise. The NB loglik gradient w.r.t. theta is:
+    // So I_NB[theta,theta] = -(b + theta*c)  ... but we want observed INFO =
+    // -d²logL/d·² Actually: d(logL_NB)/d(theta) = theta * b (approximately,
+    // from the structure) Let me be precise. The NB loglik gradient w.r.t.
+    // theta is:
     //   d(logL_NB)/d(theta) = digamma_diff + log(theta/A) + 1 - (y+theta)/A = b
     // And d²(logL_NB)/d(theta)² = c (as defined above)
     // So I_NB[theta,theta] = -c
@@ -641,13 +644,14 @@ ZtnbFimResult compute_ztnb_observed_hessian_components(
     // I_ZT[theta,theta] = r*a_tt + r*(1+r)*a_theta²
     double I_ZT_tt = r * a_tt + r * (1.0 + r) * a_theta * a_theta;
 
-    // For tau = log(theta): d²/d(tau)² = theta² * d²/d(theta)² + theta * d/d(theta)
-    // I_obs[tau,tau] = -d²logL/d(tau)² = -(theta² * d²logL/d(theta)² + theta * d(logL)/d(theta))
+    // For tau = log(theta): d²/d(tau)² = theta² * d²/d(theta)² + theta *
+    // d/d(theta) I_obs[tau,tau] = -d²logL/d(tau)² = -(theta² * d²logL/d(theta)²
+    // + theta * d(logL)/d(theta))
     //               = theta²*(-c - I_ZT_tt) + theta*(-b - r*a_theta) ... wait
     // More carefully:
     //   logL_ZTNB = logL_NB - log(1-p0)
-    //   d(logL_ZTNB)/d(theta) = b + r*a_theta    [NB gradient + truncation correction]
-    //   d²(logL_ZTNB)/d(theta)² = c + d/d(theta)[r*a_theta]
+    //   d(logL_ZTNB)/d(theta) = b + r*a_theta    [NB gradient + truncation
+    //   correction] d²(logL_ZTNB)/d(theta)² = c + d/d(theta)[r*a_theta]
     //     d/d(theta)[r*a_theta] = (dr/dtheta)*a_theta + r*a_tt
     //     dr/dtheta = r*(1+r)*a_theta
     //     = r*(1+r)*a_theta² + r*a_tt = I_ZT_tt
@@ -659,7 +663,8 @@ ZtnbFimResult compute_ztnb_observed_hessian_components(
     //                  = -theta*(b + r*a_theta) - theta²*(c + I_ZT_tt)
     double first_deriv_theta = b + r * a_theta;
     double second_deriv_theta = c + I_ZT_tt;
-    double w_tt_i = -theta * first_deriv_theta - theta * theta * second_deriv_theta;
+    double w_tt_i =
+        -theta * first_deriv_theta - theta * theta * second_deriv_theta;
 
     result.v_tt_sum += w_pos(i) * w_tt_i;
   }
@@ -668,10 +673,12 @@ ZtnbFimResult compute_ztnb_observed_hessian_components(
 }
 
 // Convenience wrapper: compute analytical observed Hessian, assembled.
-arma::mat compute_ztnb_observed_info_analytical(
-    const arma::vec &beta, double theta, const arma::mat &X_pos,
-    const arma::vec &offset_pos, const arma::vec &w_pos,
-    const arma::vec &Y_pos) {
+arma::mat compute_ztnb_observed_info_analytical(const arma::vec &beta,
+                                                double theta,
+                                                const arma::mat &X_pos,
+                                                const arma::vec &offset_pos,
+                                                const arma::vec &w_pos,
+                                                const arma::vec &Y_pos) {
   auto comp = compute_ztnb_observed_hessian_components(
       beta, theta, X_pos, offset_pos, w_pos, Y_pos);
   return assemble_fim(comp, X_pos);
@@ -1648,8 +1655,8 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
 
     if (dist == "negbin") {
       // Analytical observed Hessian for NB (no finite differences needed)
-      fim = compute_ztnb_observed_info_analytical(beta_full, theta_fim,
-                                                   X_pos, off_pos, w_pos, Y_pos);
+      fim = compute_ztnb_observed_info_analytical(beta_full, theta_fim, X_pos,
+                                                  off_pos, w_pos, Y_pos);
       used_observed_info = true;
     } else if (dist == "poisson") {
       CountPoissonFunctor obs_functor(Y_pos, X_pos, off_pos, w_pos);
@@ -1776,8 +1783,7 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
   // When SPA is enabled, use spa_cutoff; otherwise default to 2.0.
   // Accept refined beta only if finite and objective improved.
   double refine_cutoff = use_spa ? spa_cutoff : 2.0;
-  bool refine_beta =
-      (n_test == 1) && (std::sqrt(T_stat) > refine_cutoff);
+  bool refine_beta = (n_test == 1) && (std::sqrt(T_stat) > refine_cutoff);
   if (refine_beta) {
     arma::vec start_refine;
     if (dist == "negbin") {
