@@ -223,7 +223,7 @@ The use of hurdle models for peak-gene link analysis in single-nucleus multiome 
 - **New feature**: Added statistical utilities for hurdle model p-value combination and FDR control:
   - `CCT()`: Cauchy Combination Test (ACAT) for combining p-values under arbitrary dependency structures.
   - `jiang_doerge_fdr()`: Two-stage FDR procedure for hurdle models, screening on one component and confirming on the other.
-  - `acat_stagewise()`: ACAT-based omnibus screening with stage-wise Holm confirmation, classifying regulatory mechanisms as "dual", "switch", "rheostat", or "omnibus_only".
+  - `acat_stagewise()`: ACAT-based omnibus screening with stage-wise Holm confirmation, classifying regulatory modes as "dual", "switch", "rheostat", or "omnibus_only".
 
 ### v1.1.0 (2026-03-05)
 

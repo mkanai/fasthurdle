@@ -121,7 +121,7 @@ jiang_doerge_fdr <- function(p_stage1, p_stage2, alpha1 = 0.1, alpha2 = 0.05) {
 #'
 #' Combines zero-inflation and count model p-values using the Cauchy
 #' combination test (CCT/ACAT) for omnibus screening, then applies stage-wise
-#' confirmation via the Holm procedure to classify the regulatory mechanism.
+#' confirmation via the Holm procedure to classify the regulatory mode.
 #' This provides overall FDR control at the screening level with family-wise
 #' error rate control within each selected pair.
 #'
@@ -140,9 +140,9 @@ jiang_doerge_fdr <- function(p_stage1, p_stage2, alpha1 = 0.1, alpha2 = 0.05) {
 #'   \item{p_adj_count}{Holm-adjusted count-model p-value (NA if not selected).}
 #'   \item{sig_zero}{Logical; zero component significant after Holm correction.}
 #'   \item{sig_count}{Logical; count component significant after Holm correction.}
-#'   \item{mechanism}{Factor classifying the link as "dual", "switch",
+#'   \item{mode}{Factor classifying the regulatory mode as "dual", "switch",
 #'     "rheostat", "omnibus_only", or "not_significant".}
-#'   \item{sig}{Logical; TRUE if mechanism is not "not_significant".}
+#'   \item{sig}{Logical; TRUE if mode is not "not_significant".}
 #' @references
 #' Van den Berge, K., et al. (2017). stageR: a general stage-wise method for
 #' controlling the gene-level false discovery rate in differential expression
@@ -192,12 +192,12 @@ acat_stagewise <- function(p_zero, p_count, alpha = 0.05,
   sig_zero <- !is.na(p_adj_zero) & p_adj_zero < alpha
   sig_count <- !is.na(p_adj_count) & p_adj_count < alpha
 
-  mechanism <- rep("not_significant", n)
-  mechanism[selected & sig_zero & sig_count] <- "dual"
-  mechanism[selected & sig_zero & !sig_count] <- "switch"
-  mechanism[selected & !sig_zero & sig_count] <- "rheostat"
-  mechanism[selected & !sig_zero & !sig_count] <- "omnibus_only"
-  mechanism <- factor(mechanism,
+  mode <- rep("not_significant", n)
+  mode[selected & sig_zero & sig_count] <- "dual"
+  mode[selected & sig_zero & !sig_count] <- "switch"
+  mode[selected & !sig_zero & sig_count] <- "rheostat"
+  mode[selected & !sig_zero & !sig_count] <- "omnibus_only"
+  mode <- factor(mode,
     levels = c("dual", "switch", "rheostat", "omnibus_only", "not_significant")
   )
 
@@ -209,7 +209,7 @@ acat_stagewise <- function(p_zero, p_count, alpha = 0.05,
     p_adj_count = p_adj_count,
     sig_zero = sig_zero,
     sig_count = sig_count,
-    mechanism = mechanism,
-    sig = mechanism != "not_significant"
+    mode = mode,
+    sig = mode != "not_significant"
   )
 }
