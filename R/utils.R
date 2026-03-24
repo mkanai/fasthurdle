@@ -141,7 +141,7 @@ jiang_doerge_fdr <- function(p_stage1, p_stage2, alpha1 = 0.1, alpha2 = 0.05) {
 #'   \item{sig_zero}{Logical; zero component significant after Holm correction.}
 #'   \item{sig_count}{Logical; count component significant after Holm correction.}
 #'   \item{mode}{Factor classifying the regulatory mode as "dual", "switch",
-#'     "rheostat", "omnibus_only", or "not_significant".}
+#'     "rheostat", "joint_only", or "not_significant".}
 #'   \item{sig}{Logical; TRUE if mode is not "not_significant".}
 #' @references
 #' Van den Berge, K., et al. (2017). stageR: a general stage-wise method for
@@ -196,14 +196,123 @@ acat_stagewise <- function(p_zero, p_count, alpha = 0.05,
   mode[selected & sig_zero & sig_count] <- "dual"
   mode[selected & sig_zero & !sig_count] <- "switch"
   mode[selected & !sig_zero & sig_count] <- "rheostat"
-  mode[selected & !sig_zero & !sig_count] <- "omnibus_only"
+  mode[selected & !sig_zero & !sig_count] <- "joint_only"
   mode <- factor(mode,
-    levels = c("dual", "switch", "rheostat", "omnibus_only", "not_significant")
+    levels = c("dual", "switch", "rheostat", "joint_only", "not_significant")
   )
 
   data.frame(
     p_omnibus = p_omnibus,
     q_omnibus = q_omnibus,
+    selected = selected,
+    p_adj_zero = p_adj_zero,
+    p_adj_count = p_adj_count,
+    sig_zero = sig_zero,
+    sig_count = sig_count,
+    mode = mode,
+    sig = mode != "not_significant"
+  )
+}
+
+#' Joint 2-df score test with stage-wise mode classification
+#'
+#' Combines zero and count model score test statistics via a joint chi-squared(2)
+#' test for omnibus screening, then applies Holm step-down for mode classification.
+#' Under the factorized hurdle likelihood, the zero and count score statistics are
+#' independent, so the joint statistic is simply their sum: T_joint = T_zero + T_count.
+#' This is more principled than ACAT (Cauchy combination) which uses an ad-hoc
+#' heavy-tailed combination.
+#'
+#' Takes chi-squared statistics directly (not p-values) to avoid underflow at
+#' large sample sizes where p-values can be numerically zero.
+#'
+#' @param chisq_zero Numeric vector of zero-model chi-squared statistics (1 df).
+#'   From \code{score_test_zero()$statistic} or \code{summary()$coefficients$zero[,"z value"]^2}.
+#' @param chisq_count Numeric vector of count-model chi-squared statistics (1 df).
+#'   From \code{score_test_count()$statistic} or \code{summary()$coefficients$count[,"z value"]^2}.
+#' @param alpha Significance threshold for both screening and confirmation
+#'   (default: 0.05).
+#' @param pi0.method Method for estimating the proportion of true nulls in
+#'   \code{\link[qvalue]{qvalue}}. Either \code{"smoother"} (default) or
+#'   \code{"bootstrap"}.
+#' @return A data.frame with columns:
+#'   \item{chisq_joint}{Joint chi-squared(2) statistic (T_zero + T_count).}
+#'   \item{p_joint}{Joint p-value from chi-squared(2) distribution.}
+#'   \item{q_joint}{qvalue-based FDR for the joint test.}
+#'   \item{selected}{Logical; TRUE if q_joint < alpha.}
+#'   \item{p_adj_zero}{Holm-adjusted zero-model p-value (NA if not selected).}
+#'   \item{p_adj_count}{Holm-adjusted count-model p-value (NA if not selected).}
+#'   \item{sig_zero}{Logical; zero component significant after Holm correction.}
+#'   \item{sig_count}{Logical; count component significant after Holm correction.}
+#'   \item{mode}{Factor classifying the regulatory mode as "dual", "switch",
+#'     "rheostat", "joint_only", or "not_significant".}
+#'   \item{sig}{Logical; TRUE if mode is not "not_significant".}
+#' @references
+#' Van den Berge, K., et al. (2017). stageR: a general stage-wise method for
+#' controlling the gene-level false discovery rate in differential expression
+#' and differential transcript usage. \emph{Genome Biology}, 18, 151.
+#' @importFrom stats pchisq p.adjust
+#' @export
+joint_score_test <- function(chisq_zero, chisq_count,
+                              alpha = 0.05,
+                              pi0.method = c("smoother", "bootstrap")) {
+  pi0.method <- match.arg(pi0.method)
+  n <- length(chisq_zero)
+  if (length(chisq_count) != n) {
+    stop("'chisq_zero' and 'chisq_count' must have the same length")
+  }
+  if (!requireNamespace("qvalue", quietly = TRUE)) {
+    stop("package 'qvalue' is required; install with: BiocManager::install(\"qvalue\")")
+  }
+
+  # Joint statistic: T_zero + T_count ~ chi2(2)
+  # Valid because zero and count scores are independent under factorized hurdle
+  chisq_joint <- chisq_zero + chisq_count
+  p_joint <- ifelse(is.na(chisq_joint), NA_real_,
+                     pchisq(chisq_joint, df = 2, lower.tail = FALSE))
+
+  # FDR control via qvalue (fall back to BH if qvalue fails, e.g., all p < lambda)
+  q_joint <- rep(NA_real_, n)
+  ok <- !is.na(p_joint)
+  if (sum(ok) > 1) {
+    q_joint[ok] <- tryCatch(
+      qvalue::qvalue(p_joint[ok], pi0.method = pi0.method)$qvalues,
+      error = function(e) stats::p.adjust(p_joint[ok], method = "BH")
+    )
+  }
+
+  selected <- !is.na(q_joint) & q_joint < alpha
+
+  # Confirmation: Holm procedure within each selected pair
+  # Compute component p-values from chi-squared stats (avoids requiring separate p inputs)
+  p_zero <- pchisq(chisq_zero, df = 1, lower.tail = FALSE)
+  p_count <- pchisq(chisq_count, df = 1, lower.tail = FALSE)
+
+  p_adj_zero <- rep(NA_real_, n)
+  p_adj_count <- rep(NA_real_, n)
+  idx <- which(selected)
+  for (i in idx) {
+    holm <- stats::p.adjust(c(p_zero[i], p_count[i]), method = "holm")
+    p_adj_zero[i] <- holm[1]
+    p_adj_count[i] <- holm[2]
+  }
+
+  sig_zero <- !is.na(p_adj_zero) & p_adj_zero < alpha
+  sig_count <- !is.na(p_adj_count) & p_adj_count < alpha
+
+  mode <- rep("not_significant", n)
+  mode[selected & sig_zero & sig_count] <- "dual"
+  mode[selected & sig_zero & !sig_count] <- "switch"
+  mode[selected & !sig_zero & sig_count] <- "rheostat"
+  mode[selected & !sig_zero & !sig_count] <- "joint_only"
+  mode <- factor(mode,
+    levels = c("dual", "switch", "rheostat", "joint_only", "not_significant")
+  )
+
+  data.frame(
+    chisq_joint = chisq_joint,
+    p_joint = p_joint,
+    q_joint = q_joint,
     selected = selected,
     p_adj_zero = p_adj_zero,
     p_adj_count = p_adj_count,
