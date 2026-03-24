@@ -20,7 +20,7 @@ score_test_count(
 \arguments{
 \item{X_null}{Model matrix for the null model (intercept + covariates).}
 
-\item{x_test}{Test variable vector or matrix.}
+\item{x_test}{Test variable vector or single-column matrix.}
 
 \item{y}{Response vector of counts.}
 
@@ -45,20 +45,22 @@ Default is 10000.}
 }
 \value{
 A list with components:
-  \item{beta}{Effect size estimate. For significant tests (when SPA fires),
-    refined via 5-iteration BFGS from the score estimate (within ~1\% of full MLE).
-    For non-significant tests, uses the ratio estimator (approximate).}
+  \item{beta}{Effect size estimate. For significant tests (|z| > \code{spa_cutoff},
+    or |z| > 2 when SPA is disabled), refined via 5-iteration BFGS from the score
+    estimate (within ~3\% of full MLE). For non-significant tests, uses the ratio
+    estimator (approximate).}
   \item{se}{Standard error, back-computed from the p-value for consistency.}
-  \item{statistic}{The score test statistic (chi-squared).}
+  \item{statistic}{The score test statistic (chi-squared, using observed information).}
   \item{pvalue}{The p-value. SPA-adjusted when |z| > \code{spa_cutoff}.}
   \item{spa_applied}{Logical. Whether SPA was applied.}
   \item{null_par}{The null model MLE parameters.}
   \item{null_convergence}{Convergence status of the null model.}
 }
 \description{
-Computes the score test for one or more predictors in the count component
+Computes the score test for a single predictor in the count component
 of a hurdle model. The score test evaluates the score statistic at the null
-MLE, avoiding the beta-theta confounding that can inflate NB Wald tests.
+MLE using the observed information (negative Hessian) instead of the expected
+Fisher information, making it robust to model misspecification.
 }
 \examples{
 \dontrun{

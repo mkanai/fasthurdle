@@ -35,10 +35,13 @@
 #' When \code{score_test} is specified, the function operates differently:
 #' \itemize{
 #'   \item Neither the full count nor zero model is fitted — only the null models.
-#'   \item Both count and zero components use score tests for the test variable.
-#'   \item For significant tests (|z| > \code{spa_cutoff}), beta is refined via a short
-#'     BFGS optimization from the score estimate (within ~1\% of the full MLE). For
-#'     non-significant tests, beta uses the ratio estimator (approximate).
+#'   \item The count component uses the observed information (negative Hessian) instead
+#'     of the expected Fisher information, making it robust to model misspecification.
+#'   \item The zero component uses the expected FIM with SPA (already well-calibrated).
+#'   \item For significant tests (|z| > \code{spa_cutoff}, or |z| > 2 when SPA is
+#'     disabled), beta is refined via a short BFGS optimization from the score estimate
+#'     (within ~3\% of the full MLE). For non-significant tests, beta uses the ratio
+#'     estimator (approximate).
 #'   \item Covariate coefficients are the null model MLEs (valid under H0).
 #'   \item \code{loglik} is the null models' log-likelihood, not the full model's.
 #'   \item \code{vcov} has NA for covariate SEs; score-based SE for the test variable.

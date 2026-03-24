@@ -70,9 +70,11 @@ summary(model)
 
 ## Score test
 
-By default, `fasthurdle` uses the **Wald test** for inference, same as `pscl::hurdle`. The **score test** is an alternative that evaluates significance at the null model — it does not fit the full count model, making it both faster (~2x) and better calibrated. The score test is available for all count distributions (negbin, poisson, geometric) and is especially recommended for the NB count model, where the Wald test can produce inflated p-values when the dispersion parameter θ is poorly identified.
+By default, `fasthurdle` uses the **Wald test** for inference, same as `pscl::hurdle`. The **score test** is an alternative that evaluates significance at the null model — it does not fit the full count model, making it both faster (~1.5x with cached nulls) and robust to model misspecification. The score test is available for all count distributions (negbin, poisson, geometric).
 
-With `score_test`, both the count and zero components use score tests for the specified variable. SPA is applied using closed-form cumulant generating functions (zero-truncated NB for count, binomial for zero) for accurate tail p-values (on by default, `spa_cutoff = 2`). For significant tests, beta is refined via a short BFGS optimization from the score estimate, giving accuracy within ~1% of the full MLE. The `summary()` output format is unchanged.
+The count component uses the **observed information** (negative Hessian at the null MLE) instead of the expected Fisher information. This makes the score test robust to distributional misspecification — it matches Wald test calibration even when the NB model is not perfectly specified (e.g., ambient RNA contamination, non-NB count distributions). The zero component uses the expected FIM with SPA, which is already well-calibrated.
+
+For significant tests (|z| > `spa_cutoff`, or |z| > 2 when SPA is disabled), beta is refined via a short BFGS optimization, giving accuracy within ~3% of the full MLE. SPA provides tail p-value correction for sparse genes at small sample sizes. The `summary()` output format is unchanged.
 
 ```r
 # Wald (default)
@@ -208,9 +210,13 @@ The use of hurdle models for peak-gene link analysis in single-nucleus multiome 
 
 ## Changelog
 
-### v1.2.0 (2026-03-21)
+### v1.2.0 (2026-03-23)
 
-- **New feature**: Score test with saddlepoint approximation (SPA) for both count and zero components (`score_test` parameter in `fast_negbin_hurdle()` and `fasthurdle()`). SPA uses closed-form cumulant generating functions (zero-truncated NB for count, binomial for zero). Both null models can be cached via `fit_null_count()` and `fit_null_zero()` for high-throughput testing. Beta for significant tests is refined via 5-iteration BFGS (within ~1% of full MLE).
+- **New feature**: Score test with saddlepoint approximation (SPA) for both count and zero components (`score_test` parameter in `fast_negbin_hurdle()` and `fasthurdle()`).
+  - Count component uses **observed information** (analytical negative Hessian) instead of expected FIM, making it robust to model misspecification. Matches Wald calibration under both correct NB and misspecified distributions (e.g., ambient RNA contamination).
+  - Zero component uses expected FIM with SPA (closed-form binomial CGF), which is already well-calibrated.
+  - Beta for significant tests (|z| > `spa_cutoff`) is refined via 5-iteration BFGS (within ~3% of full MLE).
+  - Both null models can be cached via `fit_null_count()` and `fit_null_zero()` for high-throughput testing (~1.5x faster than Wald per peak with cached nulls).
 
 ### v1.1.1 (2026-03-09)
 

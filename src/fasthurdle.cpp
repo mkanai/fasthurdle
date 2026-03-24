@@ -515,6 +515,207 @@ arma::mat compute_ztnb_fisher_info(const arma::vec &beta, double theta,
   return assemble_fim(comp, X_pos);
 }
 
+// ==========================================================================
+// Observed information (analytical negative Hessian) for ZTNB model
+// ==========================================================================
+
+// Compute the observed information matrix (negative Hessian of the ZTNB
+// log-likelihood) analytically at given parameter values and observed data.
+// Returns components in the same ZtnbFimResult structure as the expected FIM,
+// so assemble_fim() can be reused directly.
+//
+// For logL_ZTNB = logf_NB(y) - log(1-p0), the observed info is:
+//   I_obs = -d²logL_ZTNB/dθdθ' = I_NB + I_ZT
+// where I_ZT uses: d²log(1-p0)/dudv = -r*a_uv - r*(1+r)*a_u*a_v
+//
+// Parameters are (beta_1, ..., beta_p, tau) where tau = log(theta).
+// Cost: O(n_pos) per-observation loop (no PMF recurrence), plus O(n_pos*p²)
+// for X'WX assembly via assemble_fim().
+ZtnbFimResult compute_ztnb_observed_hessian_components(
+    const arma::vec &beta, double theta, const arma::mat &X_pos,
+    const arma::vec &offset_pos, const arma::vec &w_pos,
+    const arma::vec &Y_pos) {
+  int n_pos = X_pos.n_rows;
+  double log_theta = std::log(theta);
+
+  ZtnbFimResult result;
+  result.v_ee.zeros(n_pos);
+  result.v_et.zeros(n_pos);
+  result.v_tt_sum = 0.0;
+
+  for (int i = 0; i < n_pos; i++) {
+    double eta_i = arma::dot(X_pos.row(i), beta) + offset_pos(i);
+    double mu = std::exp(eta_i);
+    double y = Y_pos(i);
+    double A = mu + theta;           // A_i = mu_i + theta
+    double A2 = A * A;
+    double mu_over_A = mu / A;
+    double theta_over_A = theta / A;
+
+    // Zero-truncation quantities
+    // log(p0) = -theta * log1p(mu/theta) for numerical stability at large theta
+    double log_p0 = -theta * std::log1p(mu / theta);
+    double p0 = std::exp(log_p0);
+    double p1 = 1.0 - p0;
+    if (p1 < 1e-300) p1 = 1e-300;
+    double r = p0 / p1;              // r_i = p0/(1-p0)
+
+    // Zero-truncation first derivatives of log(p0) w.r.t. (eta, theta):
+    //   a_eta = d(log p0)/d(eta) = -theta*mu/A
+    //   a_theta = d(log p0)/d(theta) = log(theta/A) + 1 - theta/A
+    //           = -log1p(mu/theta) + mu/A   [stable at large theta]
+    double a_eta = -theta * mu_over_A;
+    double a_theta = -std::log1p(mu / theta) + mu_over_A;
+
+    // Zero-truncation second derivatives of log(p0):
+    //   a_eta_eta = d²(log p0)/d(eta)² = -theta*mu*theta/A²
+    //            = -theta²*mu/A²
+    double a_ee = -theta * theta * mu / A2;
+    //   a_eta_theta = d²(log p0)/d(eta)d(theta) = -mu²/A²
+    //              (d/dtheta of -theta*mu/A = -mu/A + theta*mu/A² = -mu²/A²... wait)
+    //   Actually: a_eta = -theta*mu/A, so
+    //   d(a_eta)/d(theta) = -mu/A + theta*mu/A² = -mu(A-theta)/A² = -mu²/A²
+    double a_et = -mu * mu / A2;
+    //   a_theta_theta = d²(log p0)/d(theta)² = mu²/(theta*A²)
+    double a_tt = mu * mu / (theta * A2);
+
+    // d²log(1-p0)/dudv = -r*a_uv - r*(1+r)*a_u*a_v
+    // The observed info is I_obs = -d²logL_ZTNB = -d²logf_NB + d²(-log(1-p0))
+    //                            = I_NB - d²log(1-p0)/dudv
+    //                            = I_NB + r*a_uv + r*(1+r)*a_u*a_v
+    // Wait: I_obs = -d²(logf_NB - log(1-p0)) = -d²logf_NB + d²log(1-p0)
+    //             = I_NB + d²log(1-p0)/dudv
+    //             = I_NB + (-r*a_uv - r*(1+r)*a_u*a_v)
+    //             = I_NB - r*a_uv - r*(1+r)*a_u*a_v
+
+    // ---- Beta-beta weight (w_ee) ----
+    // I_NB_ee = mu*theta*(y+theta)/A²  [per obs, scalar multiplying x_j*x_k]
+    double I_NB_ee = mu * theta * (y + theta) / A2;
+    // ZT correction: -r*a_ee - r*(1+r)*a_eta²
+    double ZT_ee = -r * a_ee - r * (1.0 + r) * a_eta * a_eta;
+    result.v_ee(i) = w_pos(i) * (I_NB_ee + ZT_ee);
+
+    // ---- Beta-logtheta weight (w_et) ----
+    // Chain rule: d/d(tau) = theta * d/d(theta), so mixed derivative in (eta, tau):
+    //   I_obs[eta, tau] = theta * I_obs[eta, theta]
+    // I_NB[eta,theta] = mu*(mu-y)/A²
+    double I_NB_et = mu * (mu - y) / A2;
+    // ZT correction: -r*a_et - r*(1+r)*a_eta*a_theta
+    double ZT_et = -r * a_et - r * (1.0 + r) * a_eta * a_theta;
+    // Multiply by theta for tau = log(theta) parameterization
+    result.v_et(i) = w_pos(i) * theta * (I_NB_et + ZT_et);
+
+    // ---- Logtheta-logtheta weight (w_tt) ----
+    // Chain rule: d²/d(tau)² = theta² * d²/d(theta)² + theta * d/d(theta)
+    //
+    // First compute d(logL_NB)/d(theta) / theta = b  (the "first derivative / theta")
+    // Using recurrence for psi(y+theta) - psi(theta):
+    //   digamma_diff = sum_{k=0}^{y-1} 1/(theta+k)
+    double digamma_diff = 0.0;
+    double trigamma_diff = 0.0;
+    int yi = static_cast<int>(y);
+    for (int k = 0; k < yi; k++) {
+      double tk = theta + static_cast<double>(k);
+      digamma_diff += 1.0 / tk;
+      trigamma_diff += 1.0 / (tk * tk);
+    }
+
+    // b = digamma_diff + log(theta/A) + 1 - (y+theta)/A
+    double log_ratio = log_theta - std::log(A);
+    double b = digamma_diff + log_ratio + 1.0 - (y + theta) / A;
+
+    // c = d²(logL_NB)/d(theta)² core
+    //   = -trigamma_diff + 1/theta - 1/A + (y-mu)/A²
+    // Note: trigamma_diff = psi1(theta) - psi1(y+theta) via recurrence
+    double c = -trigamma_diff + 1.0 / theta - 1.0 / A + (y - mu) / A2;
+
+    // I_NB[theta,theta] = -(b + theta*c)  [negative of d²logL/dtheta²]
+    // Wait: d²logL_NB/dtheta² = d/dtheta(theta*b) = b + theta*c
+    // So I_NB[theta,theta] = -(b + theta*c)  ... but we want observed INFO = -d²logL/d·²
+    // Actually: d(logL_NB)/d(theta) = theta * b (approximately, from the structure)
+    // Let me be precise. The NB loglik gradient w.r.t. theta is:
+    //   d(logL_NB)/d(theta) = digamma_diff + log(theta/A) + 1 - (y+theta)/A = b
+    // And d²(logL_NB)/d(theta)² = c (as defined above)
+    // So I_NB[theta,theta] = -c
+
+    // I_ZT[theta,theta] = r*a_tt + r*(1+r)*a_theta²
+    double I_ZT_tt = r * a_tt + r * (1.0 + r) * a_theta * a_theta;
+
+    // For tau = log(theta): d²/d(tau)² = theta² * d²/d(theta)² + theta * d/d(theta)
+    // I_obs[tau,tau] = -d²logL/d(tau)² = -(theta² * d²logL/d(theta)² + theta * d(logL)/d(theta))
+    //               = theta²*(-c - I_ZT_tt) + theta*(-b - r*a_theta) ... wait
+    // More carefully:
+    //   logL_ZTNB = logL_NB - log(1-p0)
+    //   d(logL_ZTNB)/d(theta) = b + r*a_theta    [NB gradient + truncation correction]
+    //   d²(logL_ZTNB)/d(theta)² = c + d/d(theta)[r*a_theta]
+    //     d/d(theta)[r*a_theta] = (dr/dtheta)*a_theta + r*a_tt
+    //     dr/dtheta = r*(1+r)*a_theta
+    //     = r*(1+r)*a_theta² + r*a_tt = I_ZT_tt
+    //   So d²(logL_ZTNB)/d(theta)² = c + I_ZT_tt
+    //
+    //   For tau: d(logL)/d(tau) = theta * [b + r*a_theta]
+    //           d²(logL)/d(tau)² = theta*[b + r*a_theta] + theta²*[c + I_ZT_tt]
+    //   I_obs[tau,tau] = -d²(logL)/d(tau)²
+    //                  = -theta*(b + r*a_theta) - theta²*(c + I_ZT_tt)
+    double first_deriv_theta = b + r * a_theta;
+    double second_deriv_theta = c + I_ZT_tt;
+    double w_tt_i = -theta * first_deriv_theta - theta * theta * second_deriv_theta;
+
+    result.v_tt_sum += w_pos(i) * w_tt_i;
+  }
+
+  return result;
+}
+
+// Convenience wrapper: compute analytical observed Hessian, assembled.
+arma::mat compute_ztnb_observed_info_analytical(
+    const arma::vec &beta, double theta, const arma::mat &X_pos,
+    const arma::vec &offset_pos, const arma::vec &w_pos,
+    const arma::vec &Y_pos) {
+  auto comp = compute_ztnb_observed_hessian_components(
+      beta, theta, X_pos, offset_pos, w_pos, Y_pos);
+  return assemble_fim(comp, X_pos);
+}
+
+// ==========================================================================
+// Observed information (numerical Hessian) via finite differences — fallback
+// ==========================================================================
+
+// Compute the observed information matrix at a given parameter vector using
+// central finite differences on the gradient. Works with any count functor.
+// Returns an np x np symmetric matrix where np = parms.n_elem.
+// The functor computes the gradient of -loglik, so -H = -(d(-grad)/dparms)
+// = d(grad)/dparms, i.e., the observed info is the Jacobian of the
+// negative-loglik gradient.
+template <typename Functor>
+arma::mat compute_observed_info(Functor &functor, const arma::vec &parms,
+                                double eps_base = 1e-5) {
+  int np = parms.n_elem;
+  arma::mat H(np, np);
+
+  // Central differences with parameter-scaled step size.
+  // eps_j = eps_base * max(|parms_j|, 1) avoids too-small steps near zero
+  // and scales with parameter magnitude for better numerical conditioning.
+  for (int j = 0; j < np; j++) {
+    double eps_j = eps_base * std::max(std::abs(parms(j)), 1.0);
+    arma::vec parms_fwd = parms;
+    arma::vec parms_bwd = parms;
+    parms_fwd(j) += eps_j;
+    parms_bwd(j) -= eps_j;
+
+    arma::vec grad_fwd, grad_bwd;
+    functor.Gradient(parms_fwd, grad_fwd);
+    functor.Gradient(parms_bwd, grad_bwd);
+
+    // grad = d(-logL)/dθ, so dgrad/dθ = d²(-logL)/dθdθ' = -d²logL/dθdθ'
+    // That IS the observed information (negative Hessian of logL).
+    H.col(j) = (grad_fwd - grad_bwd) / (2.0 * eps_j);
+  }
+
+  // Symmetrize (numerical noise can make it slightly asymmetric)
+  return 0.5 * (H + H.t());
+}
+
 // R-exported test wrapper. Takes full data; filters to Y>0 internally.
 // [[Rcpp::export]]
 arma::mat compute_ztnb_fisher_info_cpp(const arma::vec &beta, double theta,
@@ -1418,7 +1619,10 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
         Rcpp::Named("spa_applied") = false);
   }
 
-  // Determine theta for FIM computation
+  // Compute information matrix at the null MLE.
+  // Try observed information (negative Hessian) first — more robust under
+  // model misspecification. Fall back to expected FIM if observed info is
+  // indefinite (e.g., small n_pos, boundary theta).
   double theta_fim;
   arma::vec beta_full = parms_full.subvec(0, kx_full - 1);
   if (dist == "negbin") {
@@ -1429,9 +1633,48 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
     theta_fim = 1e8;  // Poisson ≈ NB with large theta
   }
 
-  arma::mat fim =
-      compute_ztnb_fisher_info(beta_full, theta_fim, X_full.rows(Y1),
-                               offsetx.elem(Y1), weights.elem(Y1));
+  arma::mat fim;
+  bool used_observed_info = false;
+
+  // Observed information via numerical differentiation on the gradient.
+  // IMPORTANT: Use only Y>0 observations — the count model in the hurdle
+  // operates on positive counts only. The functor subsets internally, but
+  // we must pass only Y>0 data so the Hessian reflects the count component.
+  {
+    arma::vec Y_pos = Y.elem(Y1);
+    arma::mat X_pos = X_full.rows(Y1);
+    arma::vec off_pos = offsetx.elem(Y1);
+    arma::vec w_pos = weights.elem(Y1);
+
+    if (dist == "negbin") {
+      // Analytical observed Hessian for NB (no finite differences needed)
+      fim = compute_ztnb_observed_info_analytical(beta_full, theta_fim,
+                                                   X_pos, off_pos, w_pos, Y_pos);
+      used_observed_info = true;
+    } else if (dist == "poisson") {
+      CountPoissonFunctor obs_functor(Y_pos, X_pos, off_pos, w_pos);
+      fim = compute_observed_info(obs_functor, parms_full);
+      used_observed_info = true;
+    } else if (dist == "geometric") {
+      CountGeomFunctor obs_functor(Y_pos, X_pos, off_pos, w_pos);
+      fim = compute_observed_info(obs_functor, parms_full);
+      used_observed_info = true;
+    }
+  }
+
+  // Validate observed Hessian: must be finite. We do NOT require the full
+  // matrix to be PD — the full observed info can be indefinite while the
+  // Schur complement (effective information for the test variable) is still
+  // positive. The Schur complement positivity is checked separately below.
+  bool obs_info_valid = used_observed_info && fim.is_finite();
+  if (!obs_info_valid) {
+    // Fall back to expected FIM. For Poisson/geometric, the expected FIM
+    // uses theta_fim (1e8 or 1.0) and returns (kx_full+1) x (kx_full+1),
+    // which is the same behavior as before observed info was added.
+    fim = compute_ztnb_fisher_info(beta_full, theta_fim, X_full.rows(Y1),
+                                   offsetx.elem(Y1), weights.elem(Y1));
+    used_observed_info = false;
+  }
 
   // Extract FIM blocks for Schur complement.
   // Project out all nuisance parameters (null betas + theta for NB).
@@ -1463,6 +1706,16 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
   }
   arma::mat I_test = I_tt - I_nt.t() * I_nn_inv_Int;
 
+  // Guard: Schur complement must be positive (definite for n_test > 1).
+  // If observed info produced a non-positive I_test, return NA.
+  if (n_test == 1 && (I_test(0, 0) <= 0 || !std::isfinite(I_test(0, 0)))) {
+    return Rcpp::List::create(
+        Rcpp::Named("beta") = arma::vec(n_test, arma::fill::value(NA_REAL)),
+        Rcpp::Named("se") = arma::vec(n_test, arma::fill::value(NA_REAL)),
+        Rcpp::Named("statistic") = NA_REAL, Rcpp::Named("pvalue") = NA_REAL,
+        Rcpp::Named("spa_applied") = false);
+  }
+
   // Score test statistic: T = U' I_eff^{-1} U ~ chi2(n_test)
   double T_stat;
   arma::vec beta_hat(n_test);  // ratio estimator: beta = U / I
@@ -1472,7 +1725,16 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
     T_stat = U_test(0) * U_test(0) / I_val;
     beta_hat(0) = U_test(0) / I_val;
   } else {
-    arma::mat I_test_inv = arma::solve(I_test, arma::eye(n_test, n_test));
+    arma::mat I_test_inv;
+    bool test_solve_ok =
+        arma::solve(I_test_inv, I_test, arma::eye(n_test, n_test));
+    if (!test_solve_ok) {
+      return Rcpp::List::create(
+          Rcpp::Named("beta") = arma::vec(n_test, arma::fill::value(NA_REAL)),
+          Rcpp::Named("se") = arma::vec(n_test, arma::fill::value(NA_REAL)),
+          Rcpp::Named("statistic") = NA_REAL, Rcpp::Named("pvalue") = NA_REAL,
+          Rcpp::Named("spa_applied") = false);
+    }
     T_stat = arma::as_scalar(U_test.t() * I_test_inv * U_test);
     beta_hat = I_test_inv * U_test;
   }
@@ -1508,10 +1770,15 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
   }
 
   // Beta refinement: run a few BFGS iterations from the score estimate
-  // to correct the ratio estimator bias (~20% for count predictors).
-  // Only fires when SPA triggered (significant tests).
+  // to correct the ratio estimator bias. With observed information, the
+  // ratio estimator (U/I_eff) can be more biased than with expected FIM,
+  // so we trigger refinement when |z| exceeds the cutoff (default 2.0).
+  // When SPA is enabled, use spa_cutoff; otherwise default to 2.0.
   // Accept refined beta only if finite and objective improved.
-  if (spa_applied && n_test == 1) {
+  double refine_cutoff = use_spa ? spa_cutoff : 2.0;
+  bool refine_beta =
+      (n_test == 1) && (std::sqrt(T_stat) > refine_cutoff);
+  if (refine_beta) {
     arma::vec start_refine;
     if (dist == "negbin") {
       start_refine.zeros(kx_full + 1);

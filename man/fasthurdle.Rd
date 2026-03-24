@@ -105,13 +105,13 @@ When \code{score_test} is specified, the full count model is still fitted (unlik
 results are stored in the \code{$score_test_count} and \code{$score_test_zero} slots alongside
 the standard Wald results. This allows comparison between the two testing approaches.
 
-The count score test is available for all count distributions (negbin, poisson, geometric).
-The zero score test is available for binomial/logit only. Both are especially recommended
-for high-throughput testing where caching the null models gives large speedups.
+The count score test uses the observed information (negative Hessian) instead of the
+expected Fisher information, making it robust to model misspecification. Available for
+all count distributions (negbin, poisson, geometric). The zero score test uses the
+expected FIM with SPA (binomial/logit only), which is already well-calibrated.
 
-SPA uses closed-form cumulant generating functions (zero-truncated NB for count, binomial
-for zero) for numerically stable tail probabilities at any sample size. For significant
-tests, beta is refined via 5-iteration BFGS from the score estimate (within ~1\% of the
+For significant tests (|z| > \code{spa_cutoff}, or |z| > 2 when SPA is disabled),
+beta is refined via 5-iteration BFGS from the score estimate (within ~3\% of the
 full MLE). SE is back-computed from the p-value for consistency.
 }
 \examples{
