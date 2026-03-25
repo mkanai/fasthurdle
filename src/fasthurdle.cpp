@@ -135,6 +135,9 @@ inline arma::vec log1mexp(const arma::vec &x) {
   return result;
 }
 
+// Tag type for positive-only (pre-subsetted) data constructor
+struct PositiveOnlyTag {};
+
 // Base class for all likelihood functors
 class LikelihoodFunctor : public Functor {
  protected:
@@ -157,6 +160,7 @@ class LikelihoodFunctor : public Functor {
   arma::vec Y_pos;        // Y.elem(Y1)
 
  public:
+  // Standard constructor: finds Y>0, copies subsets
   LikelihoodFunctor(const arma::vec &y, const arma::mat &x,
                     const arma::vec &offs, const arma::vec &w)
       : Y(y), X(x), offset(offs), weights(w) {
@@ -178,6 +182,23 @@ class LikelihoodFunctor : public Functor {
     }
   }
 
+  // Positive-only constructor: caller guarantees all Y > 0.
+  // Creates zero-copy aliases for X_pos/Y_pos/etc using Armadillo's
+  // auxiliary memory mode, avoiding the O(n_pos * kx) copy.
+  LikelihoodFunctor(arma::vec &y_pos, arma::mat &x_pos, arma::vec &offs_pos,
+                    arma::vec &w_pos_in, PositiveOnlyTag)
+      : Y(y_pos),
+        X(x_pos),
+        offset(offs_pos),
+        weights(w_pos_in),
+        Y1(arma::regspace<arma::uvec>(0, y_pos.n_elem - 1)),
+        X_pos(x_pos.memptr(), x_pos.n_rows, x_pos.n_cols, false, true),
+        offset_pos(offs_pos.memptr(), offs_pos.n_elem, false, true),
+        w_pos(w_pos_in.memptr(), w_pos_in.n_elem, false, true),
+        Y_pos(y_pos.memptr(), y_pos.n_elem, false, true) {
+    // Y0 and X_zero remain empty (no zero observations)
+  }
+
   // Common utility functions
   arma::vec calculate_eta(const arma::vec &parms) const {
     return X * parms + offset;
@@ -195,15 +216,26 @@ class CountPoissonFunctor : public LikelihoodFunctor {
   arma::vec lgamma_y_1_cached;  // lgamma(Y_pos + 1), constant across iterations
 
  public:
-  CountPoissonFunctor(const arma::vec &y, const arma::mat &x,
-                      const arma::vec &offs, const arma::vec &w)
-      : LikelihoodFunctor(y, x, offs, w) {
+  void build_lgamma_cache() {
     if (Y1.n_elem > 0) {
       lgamma_y_1_cached.set_size(Y1.n_elem);
       for (size_t i = 0; i < Y1.n_elem; i++) {
         lgamma_y_1_cached(i) = lgamma(Y_pos(i) + 1.0);
       }
     }
+  }
+
+  CountPoissonFunctor(const arma::vec &y, const arma::mat &x,
+                      const arma::vec &offs, const arma::vec &w)
+      : LikelihoodFunctor(y, x, offs, w) {
+    build_lgamma_cache();
+  }
+
+  // Positive-only constructor: zero-copy alias
+  CountPoissonFunctor(arma::vec &y_pos, arma::mat &x_pos, arma::vec &offs_pos,
+                      arma::vec &w_pos_in, PositiveOnlyTag tag)
+      : LikelihoodFunctor(y_pos, x_pos, offs_pos, w_pos_in, tag) {
+    build_lgamma_cache();
   }
 
   double operator()(const arma::vec &parms) override {
@@ -288,30 +320,39 @@ class CountNegBinFunctor : public LikelihoodFunctor {
     cache_valid = true;
   }
 
- public:
-  CountNegBinFunctor(const arma::vec &y, const arma::mat &x,
-                     const arma::vec &offs, const arma::vec &w)
-      : LikelihoodFunctor(y, x, offs, w),
-        cached_theta(0.0),
-        cache_valid(false) {
+  void build_y_caches() {
     if (Y1.n_elem > 0) {
-      // Build unique-value lookup for Y_pos
-      unique_y_vals = arma::unique(Y_pos);  // returns sorted
+      unique_y_vals = arma::unique(Y_pos);
       y_index_map.set_size(Y_pos.n_elem);
       for (size_t i = 0; i < Y_pos.n_elem; i++) {
-        // Binary search since unique_y_vals is sorted
         auto it = std::lower_bound(unique_y_vals.begin(), unique_y_vals.end(),
                                    Y_pos(i));
         y_index_map(i) = static_cast<arma::uword>(it - unique_y_vals.begin());
       }
-
-      // Cache lgamma(Y_pos + 1) using unique-value lookup
       arma::vec lgamma_unique(unique_y_vals.n_elem);
       for (size_t j = 0; j < unique_y_vals.n_elem; j++) {
         lgamma_unique(j) = lgamma(unique_y_vals(j) + 1.0);
       }
       lgamma_y_1_cached = lgamma_unique.elem(y_index_map);
     }
+  }
+
+ public:
+  CountNegBinFunctor(const arma::vec &y, const arma::mat &x,
+                     const arma::vec &offs, const arma::vec &w)
+      : LikelihoodFunctor(y, x, offs, w),
+        cached_theta(0.0),
+        cache_valid(false) {
+    build_y_caches();
+  }
+
+  // Positive-only constructor: zero-copy alias of pre-subsetted Y>0 data.
+  CountNegBinFunctor(arma::vec &y_pos, arma::mat &x_pos, arma::vec &offs_pos,
+                     arma::vec &w_pos_in, PositiveOnlyTag tag)
+      : LikelihoodFunctor(y_pos, x_pos, offs_pos, w_pos_in, tag),
+        cached_theta(0.0),
+        cache_valid(false) {
+    build_y_caches();
   }
 
   double operator()(const arma::vec &parms) override {
@@ -746,6 +787,14 @@ class CountGeomFunctor : public LikelihoodFunctor {
                    const arma::vec &offs, const arma::vec &w)
       : LikelihoodFunctor(y, x, offs, w),
         negbin_functor(std::make_shared<CountNegBinFunctor>(y, x, offs, w)) {}
+
+  // Positive-only constructor: zero-copy alias
+  CountGeomFunctor(arma::vec &y_pos, arma::mat &x_pos, arma::vec &offs_pos,
+                   arma::vec &w_pos_in, PositiveOnlyTag tag)
+      : LikelihoodFunctor(y_pos, x_pos, offs_pos, w_pos_in, tag),
+        negbin_functor(std::make_shared<CountNegBinFunctor>(y_pos, x_pos,
+                                                            offs_pos, w_pos_in,
+                                                            tag)) {}
 
   double operator()(const arma::vec &parms) override {
     // Create a new parameter vector with an additional element for theta = 1
@@ -1598,25 +1647,9 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
     parms_full.subvec(0, kx_null - 1) = null_par;
   }
 
-  // Evaluate gradient at the null (using full model design matrix)
-  // Functors return gradient of -loglik, so score = -grad
-  arma::vec grad;
-  if (dist == "negbin") {
-    CountNegBinFunctor functor(Y, X_full, offsetx, weights);
-    functor.Gradient(parms_full, grad);
-  } else if (dist == "poisson") {
-    CountPoissonFunctor functor(Y, X_full, offsetx, weights);
-    functor.Gradient(parms_full, grad);
-  } else if (dist == "geometric") {
-    CountGeomFunctor functor(Y, X_full, offsetx, weights);
-    functor.Gradient(parms_full, grad);
-  } else {
-    Rcpp::stop("Unsupported dist: " + dist);
-  }
-
-  arma::vec U_test = -grad.subvec(kx_null, kx_full - 1);
-
-  // Compute expected FIM at the null for the full model
+  // OPT-1: Pre-subset Y>0 data ONCE. The ZTNB count model only uses positive
+  // observations. Previously, this subset was created 3-4x independently
+  // (gradient functor, Hessian, SPA cache, refinement functor).
   arma::uvec Y1 = arma::find(Y > 0);
   if (Y1.n_elem == 0) {
     return Rcpp::List::create(
@@ -1625,6 +1658,32 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
         Rcpp::Named("statistic") = 0.0, Rcpp::Named("pvalue") = 1.0,
         Rcpp::Named("spa_applied") = false);
   }
+  arma::vec Y_pos = Y.elem(Y1);
+  arma::mat X_pos = X_full.rows(Y1);
+  arma::vec off_pos = offsetx.elem(Y1);
+  arma::vec w_pos = weights.elem(Y1);
+
+  // Evaluate gradient at the null using pre-subsetted Y>0 data.
+  // Functors return gradient of -loglik, so score = -grad.
+  // PositiveOnlyTag constructor creates zero-copy aliases (no find/copy).
+  arma::vec grad;
+  if (dist == "negbin") {
+    CountNegBinFunctor functor(Y_pos, X_pos, off_pos, w_pos,
+                               PositiveOnlyTag{});
+    functor.Gradient(parms_full, grad);
+  } else if (dist == "poisson") {
+    CountPoissonFunctor functor(Y_pos, X_pos, off_pos, w_pos,
+                                PositiveOnlyTag{});
+    functor.Gradient(parms_full, grad);
+  } else if (dist == "geometric") {
+    CountGeomFunctor functor(Y_pos, X_pos, off_pos, w_pos,
+                             PositiveOnlyTag{});
+    functor.Gradient(parms_full, grad);
+  } else {
+    Rcpp::stop("Unsupported dist: " + dist);
+  }
+
+  arma::vec U_test = -grad.subvec(kx_null, kx_full - 1);
 
   // Compute information matrix at the null MLE.
   // Try observed information (negative Hessian) first — more robust under
@@ -1643,30 +1702,22 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
   arma::mat fim;
   bool used_observed_info = false;
 
-  // Observed information via numerical differentiation on the gradient.
-  // IMPORTANT: Use only Y>0 observations — the count model in the hurdle
-  // operates on positive counts only. The functor subsets internally, but
-  // we must pass only Y>0 data so the Hessian reflects the count component.
-  {
-    arma::vec Y_pos = Y.elem(Y1);
-    arma::mat X_pos = X_full.rows(Y1);
-    arma::vec off_pos = offsetx.elem(Y1);
-    arma::vec w_pos = weights.elem(Y1);
-
-    if (dist == "negbin") {
-      // Analytical observed Hessian for NB (no finite differences needed)
-      fim = compute_ztnb_observed_info_analytical(beta_full, theta_fim, X_pos,
-                                                  off_pos, w_pos, Y_pos);
-      used_observed_info = true;
-    } else if (dist == "poisson") {
-      CountPoissonFunctor obs_functor(Y_pos, X_pos, off_pos, w_pos);
-      fim = compute_observed_info(obs_functor, parms_full);
-      used_observed_info = true;
-    } else if (dist == "geometric") {
-      CountGeomFunctor obs_functor(Y_pos, X_pos, off_pos, w_pos);
-      fim = compute_observed_info(obs_functor, parms_full);
-      used_observed_info = true;
-    }
+  // Observed information using pre-subsetted Y>0 data (reuses X_pos etc.)
+  if (dist == "negbin") {
+    // Analytical observed Hessian for NB (no finite differences needed)
+    fim = compute_ztnb_observed_info_analytical(beta_full, theta_fim, X_pos,
+                                                off_pos, w_pos, Y_pos);
+    used_observed_info = true;
+  } else if (dist == "poisson") {
+    CountPoissonFunctor obs_functor(Y_pos, X_pos, off_pos, w_pos,
+                                    PositiveOnlyTag{});
+    fim = compute_observed_info(obs_functor, parms_full);
+    used_observed_info = true;
+  } else if (dist == "geometric") {
+    CountGeomFunctor obs_functor(Y_pos, X_pos, off_pos, w_pos,
+                                 PositiveOnlyTag{});
+    fim = compute_observed_info(obs_functor, parms_full);
+    used_observed_info = true;
   }
 
   // Validate observed Hessian: must be finite. We do NOT require the full
@@ -1675,11 +1726,8 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
   // positive. The Schur complement positivity is checked separately below.
   bool obs_info_valid = used_observed_info && fim.is_finite();
   if (!obs_info_valid) {
-    // Fall back to expected FIM. For Poisson/geometric, the expected FIM
-    // uses theta_fim (1e8 or 1.0) and returns (kx_full+1) x (kx_full+1),
-    // which is the same behavior as before observed info was added.
-    fim = compute_ztnb_fisher_info(beta_full, theta_fim, X_full.rows(Y1),
-                                   offsetx.elem(Y1), weights.elem(Y1));
+    // Fall back to expected FIM (reuses pre-subsetted data)
+    fim = compute_ztnb_fisher_info(beta_full, theta_fim, X_pos, off_pos, w_pos);
     used_observed_info = false;
   }
 
@@ -1752,26 +1800,32 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
   // SPA: if requested and |z| > cutoff, refine p-value using saddlepoint
   bool spa_applied = false;
   if (use_spa && n_test == 1 && std::sqrt(T_stat) > spa_cutoff) {
-    // Compute g_tilde: covariate-projected test variable
+    // OPT-4: Compute g_tilde directly on pre-subsetted Y>0 data
+    // (avoids computing on all n observations then subsetting)
     arma::mat I_nn_beta = fim.submat(0, 0, kx_null - 1, kx_null - 1);
     arma::vec I_nt_beta = fim.submat(0, kx_null, kx_null - 1, kx_null);
-    arma::vec proj_coef = arma::solve(I_nn_beta, I_nt_beta);
-    arma::vec g_tilde =
-        X_full.col(kx_null) - X_full.cols(0, kx_null - 1) * proj_coef;
-    arma::vec g_tilde_pos = g_tilde.elem(Y1);
+    arma::vec proj_coef;
+    bool spa_solve_ok = arma::solve(proj_coef, I_nn_beta, I_nt_beta);
+    arma::vec g_tilde_pos;
+    if (spa_solve_ok) {
+      g_tilde_pos =
+          X_pos.col(kx_null) - X_pos.cols(0, kx_null - 1) * proj_coef;
+    }
 
-    // Build per-observation cache once, reused across all Newton iterations
-    // Empty cache signals a degenerate observation — skip SPA entirely
-    auto cgf_cache =
-        build_cgf_cache(beta_full, theta_fim, X_full.rows(Y1), offsetx.elem(Y1),
-                        weights.elem(Y1), g_tilde_pos);
+    // Build per-observation cache once, reused across all Newton iterations.
+    // Uses pre-subsetted data — no additional copies.
+    // Skip SPA if projection solve failed (singular beta FIM block).
+    if (spa_solve_ok) {
+      auto cgf_cache = build_cgf_cache(beta_full, theta_fim, X_pos, off_pos,
+                                       w_pos, g_tilde_pos);
 
-    if (!cgf_cache.empty()) {
-      double p_spa =
-          spa_pvalue_twosided(U_test(0), pvalue, theta_fim, cgf_cache);
-      if (p_spa >= 0 && p_spa <= 1.0) {
-        pvalue = p_spa;
-        spa_applied = true;
+      if (!cgf_cache.empty()) {
+        double p_spa =
+            spa_pvalue_twosided(U_test(0), pvalue, theta_fim, cgf_cache);
+        if (p_spa >= 0 && p_spa <= 1.0) {
+          pvalue = p_spa;
+          spa_applied = true;
+        }
       }
     }
   }
@@ -1782,6 +1836,8 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
   // so we trigger refinement when |z| exceeds the cutoff (default 2.0).
   // When SPA is enabled, use spa_cutoff; otherwise default to 2.0.
   // Accept refined beta only if finite and objective improved.
+  // OPT-5: Create functor once from pre-subsetted data, reuse for both
+  // objective evaluation and BFGS (avoids redundant functor construction).
   double refine_cutoff = use_spa ? spa_cutoff : 2.0;
   bool refine_beta = (n_test == 1) && (std::sqrt(T_stat) > refine_cutoff);
   if (refine_beta) {
@@ -1797,24 +1853,12 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
       start_refine(kx_null) = beta_hat(0);
     }
 
-    // Evaluate objective at starting point
-    double obj_before;
-    if (dist == "negbin") {
-      CountNegBinFunctor f0(Y, X_full, offsetx, weights);
-      obj_before = f0(start_refine);
-    } else if (dist == "poisson") {
-      CountPoissonFunctor f0(Y, X_full, offsetx, weights);
-      obj_before = f0(start_refine);
-    } else {
-      CountGeomFunctor f0(Y, X_full, offsetx, weights);
-      obj_before = f0(start_refine);
-    }
-
-    // Run 5-iteration BFGS refinement
-    double obj_after = obj_before;
+    double obj_after, obj_before;
     double beta_refined = beta_hat(0);
     if (dist == "negbin") {
-      CountNegBinFunctor functor(Y, X_full, offsetx, weights);
+      CountNegBinFunctor functor(Y_pos, X_pos, off_pos, w_pos,
+                                 PositiveOnlyTag{});
+      obj_before = functor(start_refine);
       arma::vec par = start_refine;
       Roptim<CountNegBinFunctor> opt("BFGS");
       opt.control.trace = 0;
@@ -1824,7 +1868,9 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
       obj_after = opt.value();
       beta_refined = opt.par()(kx_null);
     } else if (dist == "poisson") {
-      CountPoissonFunctor functor(Y, X_full, offsetx, weights);
+      CountPoissonFunctor functor(Y_pos, X_pos, off_pos, w_pos,
+                                  PositiveOnlyTag{});
+      obj_before = functor(start_refine);
       arma::vec par = start_refine;
       Roptim<CountPoissonFunctor> opt("BFGS");
       opt.control.trace = 0;
@@ -1834,7 +1880,9 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
       obj_after = opt.value();
       beta_refined = opt.par()(kx_null);
     } else {
-      CountGeomFunctor functor(Y, X_full, offsetx, weights);
+      CountGeomFunctor functor(Y_pos, X_pos, off_pos, w_pos,
+                               PositiveOnlyTag{});
+      obj_before = functor(start_refine);
       arma::vec par = start_refine;
       Roptim<CountGeomFunctor> opt("BFGS");
       opt.control.trace = 0;
