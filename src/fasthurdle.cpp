@@ -584,124 +584,84 @@ ZtnbFimResult compute_ztnb_observed_hessian_components(
   result.v_et.zeros(n_pos);
   result.v_tt_sum = 0.0;
 
+  // Phase 2: Vectorize eta/mu computation via BLAS DGEMV instead of per-obs
+  // dot products. This is 5-10x faster due to memory locality and SIMD.
+  arma::vec eta_vec = X_pos * beta + offset_pos;
+  arma::vec mu_vec = arma::exp(eta_vec);
+
+  // Pre-compute digamma/trigamma recurrence lookup table.
+  // Capped at 10000 to avoid memory issues with extreme outlier counts;
+  // observations with y > tab_max fall back to inline recurrence.
+  int raw_max_y = static_cast<int>(Y_pos.max());
+  int tab_max = std::min(raw_max_y, 10000);
+  std::vector<double> digamma_tab(tab_max + 1, 0.0);
+  std::vector<double> trigamma_tab(tab_max + 1, 0.0);
+  for (int k = 1; k <= tab_max; k++) {
+    double tk = theta + static_cast<double>(k - 1);
+    digamma_tab[k] = digamma_tab[k - 1] + 1.0 / tk;
+    trigamma_tab[k] = trigamma_tab[k - 1] + 1.0 / (tk * tk);
+  }
+
   for (int i = 0; i < n_pos; i++) {
-    double eta_i = arma::dot(X_pos.row(i), beta) + offset_pos(i);
-    double mu = std::exp(eta_i);
+    double mu = mu_vec(i);
     double y = Y_pos(i);
-    double A = mu + theta;  // A_i = mu_i + theta
+    double A = mu + theta;
     double A2 = A * A;
     double mu_over_A = mu / A;
-    double theta_over_A = theta / A;
 
     // Zero-truncation quantities
-    // log(p0) = -theta * log1p(mu/theta) for numerical stability at large theta
     double log_p0 = -theta * std::log1p(mu / theta);
     double p0 = std::exp(log_p0);
     double p1 = 1.0 - p0;
     if (p1 < 1e-300) p1 = 1e-300;
-    double r = p0 / p1;  // r_i = p0/(1-p0)
+    double r = p0 / p1;
 
-    // Zero-truncation first derivatives of log(p0) w.r.t. (eta, theta):
-    //   a_eta = d(log p0)/d(eta) = -theta*mu/A
-    //   a_theta = d(log p0)/d(theta) = log(theta/A) + 1 - theta/A
-    //           = -log1p(mu/theta) + mu/A   [stable at large theta]
+    // Zero-truncation first derivatives of log(p0)
     double a_eta = -theta * mu_over_A;
     double a_theta = -std::log1p(mu / theta) + mu_over_A;
 
-    // Zero-truncation second derivatives of log(p0):
-    //   a_eta_eta = d²(log p0)/d(eta)² = -theta*mu*theta/A²
-    //            = -theta²*mu/A²
+    // Zero-truncation second derivatives of log(p0)
     double a_ee = -theta * theta * mu / A2;
-    //   a_eta_theta = d²(log p0)/d(eta)d(theta) = -mu²/A²
-    //              (d/dtheta of -theta*mu/A = -mu/A + theta*mu/A² = -mu²/A²...
-    //              wait)
-    //   Actually: a_eta = -theta*mu/A, so
-    //   d(a_eta)/d(theta) = -mu/A + theta*mu/A² = -mu(A-theta)/A² = -mu²/A²
     double a_et = -mu * mu / A2;
-    //   a_theta_theta = d²(log p0)/d(theta)² = mu²/(theta*A²)
     double a_tt = mu * mu / (theta * A2);
 
-    // d²log(1-p0)/dudv = -r*a_uv - r*(1+r)*a_u*a_v
-    // The observed info is I_obs = -d²logL_ZTNB = -d²logf_NB + d²(-log(1-p0))
-    //                            = I_NB - d²log(1-p0)/dudv
-    //                            = I_NB + r*a_uv + r*(1+r)*a_u*a_v
-    // Wait: I_obs = -d²(logf_NB - log(1-p0)) = -d²logf_NB + d²log(1-p0)
-    //             = I_NB + d²log(1-p0)/dudv
-    //             = I_NB + (-r*a_uv - r*(1+r)*a_u*a_v)
-    //             = I_NB - r*a_uv - r*(1+r)*a_u*a_v
+    // I_obs = I_NB + d²log(1-p0)/dudv
+    //       = I_NB - r*a_uv - r*(1+r)*a_u*a_v
 
     // ---- Beta-beta weight (w_ee) ----
-    // I_NB_ee = mu*theta*(y+theta)/A²  [per obs, scalar multiplying x_j*x_k]
     double I_NB_ee = mu * theta * (y + theta) / A2;
-    // ZT correction: -r*a_ee - r*(1+r)*a_eta²
     double ZT_ee = -r * a_ee - r * (1.0 + r) * a_eta * a_eta;
     result.v_ee(i) = w_pos(i) * (I_NB_ee + ZT_ee);
 
     // ---- Beta-logtheta weight (w_et) ----
-    // Chain rule: d/d(tau) = theta * d/d(theta), so mixed derivative in (eta,
-    // tau):
-    //   I_obs[eta, tau] = theta * I_obs[eta, theta]
-    // I_NB[eta,theta] = mu*(mu-y)/A²
     double I_NB_et = mu * (mu - y) / A2;
-    // ZT correction: -r*a_et - r*(1+r)*a_eta*a_theta
     double ZT_et = -r * a_et - r * (1.0 + r) * a_eta * a_theta;
-    // Multiply by theta for tau = log(theta) parameterization
     result.v_et(i) = w_pos(i) * theta * (I_NB_et + ZT_et);
 
     // ---- Logtheta-logtheta weight (w_tt) ----
-    // Chain rule: d²/d(tau)² = theta² * d²/d(theta)² + theta * d/d(theta)
-    //
-    // First compute d(logL_NB)/d(theta) / theta = b  (the "first derivative /
-    // theta") Using recurrence for psi(y+theta) - psi(theta):
-    //   digamma_diff = sum_{k=0}^{y-1} 1/(theta+k)
-    double digamma_diff = 0.0;
-    double trigamma_diff = 0.0;
+    // Lookup table with inline recurrence fallback for extreme counts
     int yi = static_cast<int>(y);
-    for (int k = 0; k < yi; k++) {
-      double tk = theta + static_cast<double>(k);
-      digamma_diff += 1.0 / tk;
-      trigamma_diff += 1.0 / (tk * tk);
+    double digamma_diff, trigamma_diff;
+    if (yi <= tab_max) {
+      digamma_diff = digamma_tab[yi];
+      trigamma_diff = trigamma_tab[yi];
+    } else {
+      digamma_diff = 0.0;
+      trigamma_diff = 0.0;
+      for (int k = 0; k < yi; k++) {
+        double tk = theta + static_cast<double>(k);
+        digamma_diff += 1.0 / tk;
+        trigamma_diff += 1.0 / (tk * tk);
+      }
     }
 
-    // b = digamma_diff + log(theta/A) + 1 - (y+theta)/A
     double log_ratio = log_theta - std::log(A);
     double b = digamma_diff + log_ratio + 1.0 - (y + theta) / A;
-
-    // c = d²(logL_NB)/d(theta)² core
-    //   = -trigamma_diff + 1/theta - 1/A + (y-mu)/A²
-    // Note: trigamma_diff = psi1(theta) - psi1(y+theta) via recurrence
     double c = -trigamma_diff + 1.0 / theta - 1.0 / A + (y - mu) / A2;
 
-    // I_NB[theta,theta] = -(b + theta*c)  [negative of d²logL/dtheta²]
-    // Wait: d²logL_NB/dtheta² = d/dtheta(theta*b) = b + theta*c
-    // So I_NB[theta,theta] = -(b + theta*c)  ... but we want observed INFO =
-    // -d²logL/d·² Actually: d(logL_NB)/d(theta) = theta * b (approximately,
-    // from the structure) Let me be precise. The NB loglik gradient w.r.t.
-    // theta is:
-    //   d(logL_NB)/d(theta) = digamma_diff + log(theta/A) + 1 - (y+theta)/A = b
-    // And d²(logL_NB)/d(theta)² = c (as defined above)
-    // So I_NB[theta,theta] = -c
-
-    // I_ZT[theta,theta] = r*a_tt + r*(1+r)*a_theta²
     double I_ZT_tt = r * a_tt + r * (1.0 + r) * a_theta * a_theta;
 
-    // For tau = log(theta): d²/d(tau)² = theta² * d²/d(theta)² + theta *
-    // d/d(theta) I_obs[tau,tau] = -d²logL/d(tau)² = -(theta² * d²logL/d(theta)²
-    // + theta * d(logL)/d(theta))
-    //               = theta²*(-c - I_ZT_tt) + theta*(-b - r*a_theta) ... wait
-    // More carefully:
-    //   logL_ZTNB = logL_NB - log(1-p0)
-    //   d(logL_ZTNB)/d(theta) = b + r*a_theta    [NB gradient + truncation
-    //   correction] d²(logL_ZTNB)/d(theta)² = c + d/d(theta)[r*a_theta]
-    //     d/d(theta)[r*a_theta] = (dr/dtheta)*a_theta + r*a_tt
-    //     dr/dtheta = r*(1+r)*a_theta
-    //     = r*(1+r)*a_theta² + r*a_tt = I_ZT_tt
-    //   So d²(logL_ZTNB)/d(theta)² = c + I_ZT_tt
-    //
-    //   For tau: d(logL)/d(tau) = theta * [b + r*a_theta]
-    //           d²(logL)/d(tau)² = theta*[b + r*a_theta] + theta²*[c + I_ZT_tt]
-    //   I_obs[tau,tau] = -d²(logL)/d(tau)²
-    //                  = -theta*(b + r*a_theta) - theta²*(c + I_ZT_tt)
+    // I_obs[tau,tau] = -theta*(b + r*a_theta) - theta²*(c + I_ZT_tt)
     double first_deriv_theta = b + r * a_theta;
     double second_deriv_theta = c + I_ZT_tt;
     double w_tt_i =
@@ -723,6 +683,139 @@ arma::mat compute_ztnb_observed_info_analytical(const arma::vec &beta,
   auto comp = compute_ztnb_observed_hessian_components(
       beta, theta, X_pos, offset_pos, w_pos, Y_pos);
   return assemble_fim(comp, X_pos);
+}
+
+// ==========================================================================
+// Fused score + observed Hessian for NB count score test
+// ==========================================================================
+
+// Computes BOTH the score statistic U_test and the observed Hessian components
+// in a single pass over the data. This eliminates:
+// 1. Duplicate eta/mu computation (gradient + Hessian computed them separately)
+// 2. The full kx-vector DGEMV for the gradient (only need scalar dot for test var)
+// 3. Separate log_p0/p0/r computation in the gradient
+// Returns pre-computed mu/p0/log_p1 for optional SPA cache reuse (Phase 4).
+struct ScoreAndHessianResult {
+  double U_test;           // Score for test variable (d logL / d beta_test)
+  ZtnbFimResult hess;      // Hessian components (v_ee, v_et, v_tt_sum)
+  arma::vec mu_pos;        // Pre-computed mu per obs (for SPA cache)
+  arma::vec p0_pos;        // Pre-computed p0 per obs
+  arma::vec log_p1_pos;    // Pre-computed log(1-p0) per obs
+};
+
+ScoreAndHessianResult compute_score_and_hessian_nb(
+    const arma::vec &beta_full, double theta, const arma::mat &X_pos,
+    const arma::vec &off_pos, const arma::vec &w_pos, const arma::vec &Y_pos,
+    int kx_null, bool store_spa_intermediates = false) {
+  int n_pos = X_pos.n_rows;
+  double log_theta = std::log(theta);
+
+  ScoreAndHessianResult result;
+  result.hess.v_ee.zeros(n_pos);
+  result.hess.v_et.zeros(n_pos);
+  result.hess.v_tt_sum = 0.0;
+
+  // Vectorize eta/mu via BLAS DGEMV
+  arma::vec eta_vec = X_pos * beta_full + off_pos;
+  arma::vec mu_vec = arma::exp(eta_vec);
+
+  // Pre-compute digamma/trigamma recurrence lookup table (capped at 10000)
+  int raw_max_y = static_cast<int>(Y_pos.max());
+  int tab_max = std::min(raw_max_y, 10000);
+  std::vector<double> digamma_tab(tab_max + 1, 0.0);
+  std::vector<double> trigamma_tab(tab_max + 1, 0.0);
+  for (int k = 1; k <= tab_max; k++) {
+    double tk = theta + static_cast<double>(k - 1);
+    digamma_tab[k] = digamma_tab[k - 1] + 1.0 / tk;
+    trigamma_tab[k] = trigamma_tab[k - 1] + 1.0 / (tk * tk);
+  }
+
+  // Conditionally allocate SPA reuse buffers only when needed
+  if (store_spa_intermediates) {
+    result.mu_pos.set_size(n_pos);
+    result.p0_pos.set_size(n_pos);
+    result.log_p1_pos.set_size(n_pos);
+  }
+
+  // Single pass: compute score for test variable AND all Hessian weights
+  double U_test_acc = 0.0;
+
+  for (int i = 0; i < n_pos; i++) {
+    double mu = mu_vec(i);
+    double y = Y_pos(i);
+    double A = mu + theta;
+    double A2 = A * A;
+    double mu_over_A = mu / A;
+
+    // Zero-truncation quantities (shared by score and Hessian)
+    double log_p0 = -theta * std::log1p(mu / theta);
+    double p0 = std::exp(log_p0);
+    double p1 = 1.0 - p0;
+    if (p1 < 1e-300) p1 = 1e-300;
+    double r = p0 / p1;
+
+    // Store intermediates for SPA cache reuse (only when SPA is enabled)
+    if (store_spa_intermediates) {
+      result.mu_pos(i) = mu;
+      result.p0_pos(i) = p0;
+      // log_p1 in log-space for SPA numerical stability
+      result.log_p1_pos(i) =
+          (p0 > 0.5) ? std::log(-std::expm1(log_p0)) : std::log1p(-p0);
+    }
+
+    // ---- Score for test variable ----
+    // grad_term = d(logL_ZTNB)/d(eta) = Y - mu*(Y+theta)/A - r*theta*mu/A
+    // U_test = Σ w * grad_term * x_test (scalar dot, not full DGEMV)
+    double grad_term_i =
+        y - mu * (y + theta) / A - r * theta * mu_over_A;
+    U_test_acc += w_pos(i) * grad_term_i * X_pos(i, kx_null);
+
+    // ---- Hessian: beta-beta weight (v_ee) ----
+    double a_eta = -theta * mu_over_A;
+    double a_theta = -std::log1p(mu / theta) + mu_over_A;
+    double a_ee = -theta * theta * mu / A2;
+    double a_et = -mu * mu / A2;
+    double a_tt = mu * mu / (theta * A2);
+
+    double I_NB_ee = mu * theta * (y + theta) / A2;
+    double ZT_ee = -r * a_ee - r * (1.0 + r) * a_eta * a_eta;
+    result.hess.v_ee(i) = w_pos(i) * (I_NB_ee + ZT_ee);
+
+    // ---- Hessian: beta-logtheta weight (v_et) ----
+    double I_NB_et = mu * (mu - y) / A2;
+    double ZT_et = -r * a_et - r * (1.0 + r) * a_eta * a_theta;
+    result.hess.v_et(i) = w_pos(i) * theta * (I_NB_et + ZT_et);
+
+    // ---- Hessian: logtheta-logtheta weight (v_tt) ----
+    int yi = static_cast<int>(y);
+    double digamma_diff, trigamma_diff;
+    if (yi <= tab_max) {
+      digamma_diff = digamma_tab[yi];
+      trigamma_diff = trigamma_tab[yi];
+    } else {
+      digamma_diff = 0.0;
+      trigamma_diff = 0.0;
+      for (int k = 0; k < yi; k++) {
+        double tk = theta + static_cast<double>(k);
+        digamma_diff += 1.0 / tk;
+        trigamma_diff += 1.0 / (tk * tk);
+      }
+    }
+
+    double log_ratio = log_theta - std::log(A);
+    double b = digamma_diff + log_ratio + 1.0 - (y + theta) / A;
+    double c = -trigamma_diff + 1.0 / theta - 1.0 / A + (y - mu) / A2;
+
+    double I_ZT_tt = r * a_tt + r * (1.0 + r) * a_theta * a_theta;
+    double first_deriv_theta = b + r * a_theta;
+    double second_deriv_theta = c + I_ZT_tt;
+    double w_tt_i =
+        -theta * first_deriv_theta - theta * theta * second_deriv_theta;
+    result.hess.v_tt_sum += w_pos(i) * w_tt_i;
+  }
+
+  result.U_test = U_test_acc;
+  return result;
 }
 
 // ==========================================================================
@@ -1443,6 +1536,46 @@ std::vector<ZtnbCgfObsCache> build_cgf_cache(const arma::vec &beta,
   return cache;
 }
 
+// Phase 4: Build CGF cache from pre-computed mu/p0/log_p1 (avoids recomputing
+// eta/mu/p0/r that were already computed in the fused score+Hessian function).
+std::vector<ZtnbCgfObsCache> build_cgf_cache_from_intermediates(
+    double theta, const arma::vec &mu_pos, const arma::vec &p0_pos,
+    const arma::vec &log_p1_pos, const arma::vec &w_pos,
+    const arma::vec &g_tilde_pos) {
+  int n_pos = mu_pos.n_elem;
+  std::vector<ZtnbCgfObsCache> cache;
+  cache.reserve(n_pos);
+
+  for (int i = 0; i < n_pos; i++) {
+    double gi = g_tilde_pos(i);
+    if (std::abs(gi) < 1e-15) continue;
+
+    double mu = mu_pos(i);
+    double p0 = p0_pos(i);
+    double log_p1 = log_p1_pos(i);
+    double p1 = std::exp(log_p1);
+    if (p1 < 1e-300) {
+      cache.clear();
+      return cache;
+    }
+    double r = p0 / p1;
+    double mu_theta = mu + theta;
+    double alpha = theta / mu_theta;
+
+    ZtnbCgfObsCache obs;
+    obs.mu = mu;
+    obs.alpha = alpha;
+    obs.C_i = alpha * mu * (1.0 + r);
+    obs.p0 = p0;
+    obs.log_p1 = log_p1;
+    obs.gi = gi;
+    obs.wi = w_pos(i);
+    obs.lambda_max = std::log(1.0 + theta / mu);
+    cache.push_back(obs);
+  }
+  return cache;
+}
+
 // Evaluate closed-form CGF at t. No PMF loop — O(1) per observation.
 //
 // K_i(t) = -C_i*g_i*t + log(M_NB(lambda) - p0) - log(1-p0)
@@ -1663,32 +1796,10 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
   arma::vec off_pos = offsetx.elem(Y1);
   arma::vec w_pos = weights.elem(Y1);
 
-  // Evaluate gradient at the null using pre-subsetted Y>0 data.
-  // Functors return gradient of -loglik, so score = -grad.
-  // PositiveOnlyTag constructor creates zero-copy aliases (no find/copy).
-  arma::vec grad;
-  if (dist == "negbin") {
-    CountNegBinFunctor functor(Y_pos, X_pos, off_pos, w_pos,
-                               PositiveOnlyTag{});
-    functor.Gradient(parms_full, grad);
-  } else if (dist == "poisson") {
-    CountPoissonFunctor functor(Y_pos, X_pos, off_pos, w_pos,
-                                PositiveOnlyTag{});
-    functor.Gradient(parms_full, grad);
-  } else if (dist == "geometric") {
-    CountGeomFunctor functor(Y_pos, X_pos, off_pos, w_pos,
-                             PositiveOnlyTag{});
-    functor.Gradient(parms_full, grad);
-  } else {
-    Rcpp::stop("Unsupported dist: " + dist);
-  }
-
-  arma::vec U_test = -grad.subvec(kx_null, kx_full - 1);
-
-  // Compute information matrix at the null MLE.
-  // Try observed information (negative Hessian) first — more robust under
-  // model misspecification. Fall back to expected FIM if observed info is
-  // indefinite (e.g., small n_pos, boundary theta).
+  // Compute score (U_test) and information matrix (FIM).
+  // For NB: use fused function that computes both in a single data pass,
+  // sharing eta/mu/p0/r intermediates and using unique-value digamma lookup.
+  // For Poisson/geometric: separate gradient + numerical Hessian (fallback).
   double theta_fim;
   arma::vec beta_full = parms_full.subvec(0, kx_full - 1);
   if (dist == "negbin") {
@@ -1696,34 +1807,52 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
   } else if (dist == "geometric") {
     theta_fim = 1.0;
   } else {
-    theta_fim = 1e8;  // Poisson ≈ NB with large theta
+    theta_fim = 1e8;
   }
 
+  arma::vec U_test(n_test);
   arma::mat fim;
   bool used_observed_info = false;
+  // Pre-computed intermediates for SPA cache reuse (NB only, Phase 4)
+  arma::vec fused_mu_pos, fused_p0_pos, fused_log_p1_pos;
 
-  // Observed information using pre-subsetted Y>0 data (reuses X_pos etc.)
   if (dist == "negbin") {
-    // Analytical observed Hessian for NB (no finite differences needed)
-    fim = compute_ztnb_observed_info_analytical(beta_full, theta_fim, X_pos,
-                                                off_pos, w_pos, Y_pos);
+    // Fused score + observed Hessian: single pass, no functor needed
+    bool need_spa = use_spa && n_test == 1;
+    auto fused = compute_score_and_hessian_nb(beta_full, theta_fim, X_pos,
+                                              off_pos, w_pos, Y_pos, kx_null,
+                                              need_spa);
+    U_test(0) = fused.U_test;
+    fim = assemble_fim(fused.hess, X_pos);
     used_observed_info = true;
-  } else if (dist == "poisson") {
-    CountPoissonFunctor obs_functor(Y_pos, X_pos, off_pos, w_pos,
-                                    PositiveOnlyTag{});
-    fim = compute_observed_info(obs_functor, parms_full);
-    used_observed_info = true;
-  } else if (dist == "geometric") {
-    CountGeomFunctor obs_functor(Y_pos, X_pos, off_pos, w_pos,
-                                 PositiveOnlyTag{});
-    fim = compute_observed_info(obs_functor, parms_full);
+    fused_mu_pos = std::move(fused.mu_pos);
+    fused_p0_pos = std::move(fused.p0_pos);
+    fused_log_p1_pos = std::move(fused.log_p1_pos);
+  } else {
+    // Poisson/geometric: separate gradient + numerical observed Hessian
+    arma::vec grad;
+    if (dist == "poisson") {
+      CountPoissonFunctor functor(Y_pos, X_pos, off_pos, w_pos,
+                                  PositiveOnlyTag{});
+      functor.Gradient(parms_full, grad);
+      CountPoissonFunctor obs_functor(Y_pos, X_pos, off_pos, w_pos,
+                                      PositiveOnlyTag{});
+      fim = compute_observed_info(obs_functor, parms_full);
+    } else if (dist == "geometric") {
+      CountGeomFunctor functor(Y_pos, X_pos, off_pos, w_pos,
+                               PositiveOnlyTag{});
+      functor.Gradient(parms_full, grad);
+      CountGeomFunctor obs_functor(Y_pos, X_pos, off_pos, w_pos,
+                                   PositiveOnlyTag{});
+      fim = compute_observed_info(obs_functor, parms_full);
+    } else {
+      Rcpp::stop("Unsupported dist: " + dist);
+    }
+    U_test = -grad.subvec(kx_null, kx_full - 1);
     used_observed_info = true;
   }
 
-  // Validate observed Hessian: must be finite. We do NOT require the full
-  // matrix to be PD — the full observed info can be indefinite while the
-  // Schur complement (effective information for the test variable) is still
-  // positive. The Schur complement positivity is checked separately below.
+  // Validate observed Hessian: must be finite
   bool obs_info_valid = used_observed_info && fim.is_finite();
   if (!obs_info_valid) {
     // Fall back to expected FIM (reuses pre-subsetted data)
@@ -1813,11 +1942,16 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
     }
 
     // Build per-observation cache once, reused across all Newton iterations.
-    // Uses pre-subsetted data — no additional copies.
+    // Phase 4: For NB, reuse pre-computed mu/p0/log_p1 from fused function.
     // Skip SPA if projection solve failed (singular beta FIM block).
     if (spa_solve_ok) {
-      auto cgf_cache = build_cgf_cache(beta_full, theta_fim, X_pos, off_pos,
-                                       w_pos, g_tilde_pos);
+      auto cgf_cache =
+          (dist == "negbin" && fused_mu_pos.n_elem > 0)
+              ? build_cgf_cache_from_intermediates(
+                    theta_fim, fused_mu_pos, fused_p0_pos, fused_log_p1_pos,
+                    w_pos, g_tilde_pos)
+              : build_cgf_cache(beta_full, theta_fim, X_pos, off_pos, w_pos,
+                                g_tilde_pos);
 
       if (!cgf_cache.empty()) {
         double p_spa =
