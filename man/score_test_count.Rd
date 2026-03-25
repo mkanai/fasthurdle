@@ -12,7 +12,7 @@ score_test_count(
   weights = NULL,
   dist = c("negbin", "poisson", "geometric"),
   null_fit_count = NULL,
-  spa_cutoff = 2,
+  spa_cutoff = NULL,
   method = "BFGS",
   maxit = 10000
 )
@@ -34,8 +34,8 @@ score_test_count(
 If provided, the null model is not re-fitted, saving computation time.}
 
 \item{spa_cutoff}{Numeric or NULL. Apply saddlepoint approximation (SPA) for
-p-values when |z| exceeds this cutoff. Default is 2. Set to \code{NULL} or
-\code{Inf} to disable SPA.}
+p-values when |z| exceeds this cutoff. Default is \code{NULL} (disabled).
+Set to \code{2} to enable SPA for improved tail accuracy at small sample sizes.}
 
 \item{method}{Optimization method for fitting the null model (ignored if null_fit_count
 is provided). Default is "BFGS".}

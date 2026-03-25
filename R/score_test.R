@@ -144,7 +144,8 @@ fit_null_zero <- function(Z_null, y, offsetz = NULL, weights = NULL,
 #' @param offsetz Optional offset vector. Default is NULL.
 #' @param weights Optional weight vector. Default is NULL.
 #' @param null_fit_zero Optional cached null zero model from \code{fit_null_zero}.
-#' @param spa_cutoff SPA cutoff. Default is 2. NULL or Inf to disable.
+#' @param spa_cutoff SPA cutoff. Default is NULL (disabled). Set to 2 to enable
+#'   SPA for improved tail accuracy at small sample sizes.
 #' @param method Optimization method for null model. Default is "BFGS".
 #' @param maxit Maximum iterations for null model. Default is 10000.
 #'
@@ -152,7 +153,7 @@ fit_null_zero <- function(Z_null, y, offsetz = NULL, weights = NULL,
 #'
 #' @export
 score_test_zero <- function(Z_null, z_test, y, offsetz = NULL, weights = NULL,
-                            null_fit_zero = NULL, spa_cutoff = 2,
+                            null_fit_zero = NULL, spa_cutoff = NULL,
                             method = "BFGS", maxit = 10000) {
   n <- length(y)
   if (is.null(offsetz)) offsetz <- rep.int(0, n)
@@ -226,8 +227,8 @@ score_test_zero <- function(Z_null, z_test, y, offsetz = NULL, weights = NULL,
 #' @param null_fit_count Optional. A pre-fitted null model from \code{\link{fit_null_count}}.
 #'   If provided, the null model is not re-fitted, saving computation time.
 #' @param spa_cutoff Numeric or NULL. Apply saddlepoint approximation (SPA) for
-#'   p-values when |z| exceeds this cutoff. Default is 2. Set to \code{NULL} or
-#'   \code{Inf} to disable SPA.
+#'   p-values when |z| exceeds this cutoff. Default is \code{NULL} (disabled).
+#'   Set to \code{2} to enable SPA for improved tail accuracy at small sample sizes.
 #' @param method Optimization method for fitting the null model (ignored if null_fit_count
 #'   is provided). Default is "BFGS".
 #' @param maxit Maximum iterations for the null model (ignored if null_fit_count is provided).
@@ -259,7 +260,7 @@ score_test_zero <- function(Z_null, z_test, y, offsetz = NULL, weights = NULL,
 #' @export
 score_test_count <- function(X_null, x_test, y, offsetx = NULL, weights = NULL,
                              dist = c("negbin", "poisson", "geometric"),
-                             null_fit_count = NULL, spa_cutoff = 2,
+                             null_fit_count = NULL, spa_cutoff = NULL,
                              method = "BFGS", maxit = 10000) {
   dist <- match.arg(dist)
   n <- length(y)

@@ -16,7 +16,7 @@ fast_negbin_hurdle(
   score_test = NULL,
   null_fit_count = NULL,
   null_fit_zero = NULL,
-  spa_cutoff = 2,
+  spa_cutoff = NULL,
   compute_fitted = FALSE
 )
 }
@@ -48,8 +48,9 @@ When provided with \code{score_test}, the count null is not re-fitted.}
 When provided with \code{score_test}, the zero null is not re-fitted.}
 
 \item{spa_cutoff}{Numeric or NULL. When \code{score_test} is used, apply saddlepoint
-approximation (SPA) for p-values when |z| exceeds this cutoff. Default is 2.
-Set to \code{NULL} or \code{Inf} to disable SPA.}
+approximation (SPA) for p-values when |z| exceeds this cutoff. Default is
+\code{NULL} (disabled). Set to \code{2} to enable SPA, which improves tail
+accuracy for sparse genes at small sample sizes (n < 50K).}
 
 \item{compute_fitted}{Logical. If FALSE (default), skip computing fitted values
 and residuals for speed. Set to TRUE if you need fitted.values, residuals, y, or x

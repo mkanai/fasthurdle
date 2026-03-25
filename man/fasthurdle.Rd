@@ -18,7 +18,7 @@ fasthurdle(
   score_test = NULL,
   null_fit_count = NULL,
   null_fit_zero = NULL,
-  spa_cutoff = 2,
+  spa_cutoff = NULL,
   model = TRUE,
   y = TRUE,
   x = FALSE,
@@ -65,8 +65,9 @@ When provided with \code{score_test}, the zero null is not re-fitted. Only suppo
 with \code{zero.dist = "binomial"} and \code{link = "logit"}.}
 
 \item{spa_cutoff}{Numeric or NULL. When \code{score_test} is used, apply saddlepoint
-approximation (SPA) for p-values when |z| exceeds this cutoff. Default is 2.
-Set to \code{NULL} or \code{Inf} to disable SPA.}
+approximation (SPA) for p-values when |z| exceeds this cutoff. Default is
+\code{NULL} (disabled). Set to \code{2} to enable SPA for improved tail
+accuracy at small sample sizes (n < 50K).}
 
 \item{model}{Logical. If TRUE, the model frame is included in the returned object.}
 

@@ -11,7 +11,7 @@ score_test_zero(
   offsetz = NULL,
   weights = NULL,
   null_fit_zero = NULL,
-  spa_cutoff = 2,
+  spa_cutoff = NULL,
   method = "BFGS",
   maxit = 10000
 )
@@ -29,7 +29,8 @@ score_test_zero(
 
 \item{null_fit_zero}{Optional cached null zero model from \code{fit_null_zero}.}
 
-\item{spa_cutoff}{SPA cutoff. Default is 2. NULL or Inf to disable.}
+\item{spa_cutoff}{SPA cutoff. Default is NULL (disabled). Set to 2 to enable
+SPA for improved tail accuracy at small sample sizes.}
 
 \item{method}{Optimization method for null model. Default is "BFGS".}
 

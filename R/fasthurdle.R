@@ -29,8 +29,9 @@
 #' @param null_fit_count Optional. A pre-fitted count null model from \code{\link{fit_null_count}}.
 #'   When provided with \code{score_test}, the count null is not re-fitted.
 #' @param spa_cutoff Numeric or NULL. When \code{score_test} is used, apply saddlepoint
-#'   approximation (SPA) for p-values when |z| exceeds this cutoff. Default is 2.
-#'   Set to \code{NULL} or \code{Inf} to disable SPA.
+#'   approximation (SPA) for p-values when |z| exceeds this cutoff. Default is
+#'   \code{NULL} (disabled). Set to \code{2} to enable SPA for improved tail
+#'   accuracy at small sample sizes (n < 50K).
 #' @param null_fit_zero Optional. A pre-fitted zero null model from \code{\link{fit_null_zero}}.
 #'   When provided with \code{score_test}, the zero null is not re-fitted. Only supported
 #'   with \code{zero.dist = "binomial"} and \code{link = "logit"}.
@@ -96,7 +97,7 @@ fasthurdle <- function(formula, data, subset, na.action, weights, offset,
                        control = hurdle.control(...),
                        score_test = NULL,
                        null_fit_count = NULL, null_fit_zero = NULL,
-                       spa_cutoff = 2,
+                       spa_cutoff = NULL,
                        model = TRUE, y = TRUE, x = FALSE, ...) {
   # Match arguments
   dist <- match.arg(dist)

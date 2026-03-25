@@ -19,8 +19,9 @@
 #' @param null_fit_count Optional. A pre-fitted count null model from \code{\link{fit_null_count}}.
 #'   When provided with \code{score_test}, the count null is not re-fitted.
 #' @param spa_cutoff Numeric or NULL. When \code{score_test} is used, apply saddlepoint
-#'   approximation (SPA) for p-values when |z| exceeds this cutoff. Default is 2.
-#'   Set to \code{NULL} or \code{Inf} to disable SPA.
+#'   approximation (SPA) for p-values when |z| exceeds this cutoff. Default is
+#'   \code{NULL} (disabled). Set to \code{2} to enable SPA, which improves tail
+#'   accuracy for sparse genes at small sample sizes (n < 50K).
 #' @param null_fit_zero Optional. A pre-fitted zero null model from \code{\link{fit_null_zero}}.
 #'   When provided with \code{score_test}, the zero null is not re-fitted.
 #' @param compute_fitted Logical. If FALSE (default), skip computing fitted values
@@ -78,7 +79,7 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL,
                                method = "BFGS", maxit = 10000, separate = TRUE,
                                score_test = NULL,
                                null_fit_count = NULL, null_fit_zero = NULL,
-                               spa_cutoff = 2,
+                               spa_cutoff = NULL,
                                compute_fitted = FALSE) {
   # Fixed parameters
   dist <- "negbin"
