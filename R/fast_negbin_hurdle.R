@@ -13,17 +13,42 @@
 #' @param method Optimization method used by optim. Default is "BFGS".
 #' @param maxit Maximum number of iterations. Default is 10000.
 #' @param separate Logical. If TRUE, count and zero components are estimated separately. Default is TRUE.
+#' @param score_test Optional. Column name (character) of the variable to compute score
+#'   tests for in both the count and zero components. When specified, neither the full
+#'   count nor zero model is fitted — only the null models. See Details.
+#' @param null_fit_count Optional. A pre-fitted count null model from \code{\link{fit_null_count}}.
+#'   When provided with \code{score_test}, the count null is not re-fitted.
+#' @param spa_cutoff Numeric or NULL. When \code{score_test} is used, apply saddlepoint
+#'   approximation (SPA) for p-values when |z| exceeds this cutoff. Default is
+#'   \code{NULL} (disabled). Set to \code{2} to enable SPA, which improves tail
+#'   accuracy for sparse genes at small sample sizes (n < 50K).
+#' @param null_fit_zero Optional. A pre-fitted zero null model from \code{\link{fit_null_zero}}.
+#'   When provided with \code{score_test}, the zero null is not re-fitted.
 #' @param compute_fitted Logical. If FALSE (default), skip computing fitted values
 #'   and residuals for speed. Set to TRUE if you need fitted.values, residuals, y, or x
-#'   in the returned object.
+#'   in the returned object. Not available when \code{score_test} is used.
 #'
 #' @return An object of class "fasthurdle" representing the fitted model.
 #'
 #' @details
-#' This function is a specialized version of fasthurdle that only handles the specific
-#' parameter combination: dist = "negbin", zero.dist = "binomial", link = "logit".
-#' It takes a model matrix and response vector directly, skipping formula processing
-#' and other parameter validations to improve performance.
+#' ## Score test mode
+#'
+#' When \code{score_test} is specified, the function operates differently:
+#' \itemize{
+#'   \item Neither the full count nor zero model is fitted — only the null models.
+#'   \item The count component uses the observed information (negative Hessian) instead
+#'     of the expected Fisher information, making it robust to model misspecification.
+#'   \item The zero component uses the expected FIM with SPA (already well-calibrated).
+#'   \item For significant tests (|z| > \code{spa_cutoff}, or |z| > 2 when SPA is
+#'     disabled), beta is refined via a short BFGS optimization from the score estimate
+#'     (within ~3\% of the full MLE). For non-significant tests, beta uses the ratio
+#'     estimator (approximate).
+#'   \item Covariate coefficients are the null model MLEs (valid under H0).
+#'   \item \code{loglik} is the null models' log-likelihood, not the full model's.
+#'   \item \code{vcov} has NA for covariate SEs; score-based SE for the test variable.
+#'   \item \code{theta} is estimated from the count null model.
+#'   \item \code{compute_fitted} is not available (fitted values require the full model).
+#' }
 #'
 #' @examples
 #' \dontrun{
@@ -34,19 +59,32 @@
 #' X <- model.matrix(~ fem + mar + kid5 + phd + ment, data = bioChemists)
 #' y <- bioChemists$art
 #'
-#' # Fit the model
+#' # Fit the model (Wald test)
 #' m <- fast_negbin_hurdle(X, y)
+#' summary(m)
+#'
+#' # Fit with score test for 'ment'
+#' m <- fast_negbin_hurdle(X, y, score_test = "ment")
+#' summary(m)
+#'
+#' # High-throughput: cache null model, test many variables
+#' X_null <- model.matrix(~ fem + mar + kid5 + phd, data = bioChemists)
+#' null_fit_count <- fit_null_count(X_null, y, dist = "negbin")
+#' m <- fast_negbin_hurdle(X, y, score_test = "ment", null_fit_count = null_fit_count)
 #' summary(m)
 #' }
 #'
 #' @export
-fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, method = "BFGS", maxit = 10000, separate = TRUE, compute_fitted = FALSE) {
+fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL,
+                               method = "BFGS", maxit = 10000, separate = TRUE,
+                               score_test = NULL,
+                               null_fit_count = NULL, null_fit_zero = NULL,
+                               spa_cutoff = NULL,
+                               compute_fitted = FALSE) {
   # Fixed parameters
   dist <- "negbin"
   zero.dist <- "binomial"
   linkstr <- "logit"
-
-  # Link function (hardcoded logit)
   linkinv <- plogis
 
   # Set up model dimensions
@@ -60,149 +98,279 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, m
   if (is.null(offsetx)) offsetx <- rep.int(0, n)
   if (is.null(offsetz)) offsetz <- rep.int(0, n)
 
-  # Generate starting values
-  # For count model - fit on y > 0 subset only, since the count component
-  # models a zero-truncated distribution. This provides starting values closer
-  # to the final optimum and avoids degenerate solutions at high zero fractions.
-  pos_idx <- y > 0
-  model_count <- fastglm::fastglm(X[pos_idx, , drop = FALSE], y[pos_idx], family = poisson(), weights = weights[pos_idx], offset = offsetx[pos_idx])
-  # For zero model - for binomial zero model, we use binomial family with logit link
-  model_zero <- suppressWarnings(fastglm::fastglm(Z, as.integer(y > 0), family = binomial(link = linkstr), weights = weights, offset = offsetz))
-
-  # Combine results
-  start <- list(
-    count = model_count$coefficients,
-    zero = model_zero$coefficients,
-    theta = c(count = 1)
-  )
-
-  # Set up control parameters
-  reltol <- .Machine$double.eps^(1 / 1.6)
-  control <- list(
-    method = method,
-    maxit = maxit,
-    fnscale = -1,
-    reltol = reltol,
-    hessian = TRUE
-  )
-
-  # Perform model estimation
-  if (separate) {
-    # Estimate count component
-    fit_count <- optim_count_negbin_cpp(
-      start = c(start$count, log(start$theta["count"])),
-      Y = y, X = X, offsetx = offsetx, weights = weights,
-      method = method, hessian = TRUE, maxit = maxit, reltol = reltol
-    )
-
-    # Estimate zero component
-    fit_zero <- optim_zero_binom_cpp(
-      start = c(start$zero),
-      Y = y, X = Z, offsetx = offsetz, weights = weights,
-      link = linkstr,
-      method = method, hessian = TRUE, maxit = maxit, reltol = reltol
-    )
-
-    fit <- list(count = fit_count, zero = fit_zero)
-
-    # Extract coefficients
-    coefc <- fit_count$par[1:kx]
-    coefz <- fit_zero$par[1:kz]
-    theta <- c(
-      count = as.vector(exp(fit_count$par[kx + 1])),
-      zero = NULL
-    )
-
-    # Calculate covariance matrices
-    vc_count <- tryCatch(solve(as.matrix(fit_count$hessian)),
-      error = function(e) {
-        warning(e$message, call = FALSE)
-        k <- nrow(as.matrix(fit_count$hessian))
-        return(matrix(NA, k, k))
-      }
-    )
-    vc_zero <- tryCatch(solve(as.matrix(fit_zero$hessian)),
-      error = function(e) {
-        warning(e$message, call = FALSE)
-        k <- nrow(as.matrix(fit_zero$hessian))
-        return(matrix(NA, k, k))
-      }
-    )
-
-    # Extract standard errors for theta
-    SE.logtheta <- list()
-    diag_val <- diag(vc_count)[kx + 1]
-    SE.logtheta$count <- if (is.na(diag_val) || diag_val <= 0) NA_real_ else as.vector(sqrt(diag_val))
-    vc_count <- vc_count[-(kx + 1), -(kx + 1), drop = FALSE]
-
-    # Combine covariance matrices
-    vc <- rbind(cbind(vc_count, matrix(0, kx, kz)), cbind(matrix(0, kz, kx), vc_zero))
-    SE.logtheta <- unlist(SE.logtheta)
-
-    # Calculate loglik
-    loglik <- fit_count$value + fit_zero$value
-    converged <- fit_count$convergence < 1 & fit_zero$convergence < 1
-  } else {
-    # Estimate joint model
-    fit_result <- optim_joint_cpp(
-      start = c(
-        start$count, log(start$theta["count"]),
-        start$zero
-      ),
-      Y = y, X = X, offsetx = offsetx, Z = Z, offsetz = offsetz, weights = weights,
-      dist = dist, zero_dist = zero.dist,
-      link = linkstr,
-      method = method, hessian = TRUE, maxit = maxit, reltol = reltol
-    )
-
-    # Convert to compatible format
-    fit <- list(
-      par = fit_result$par,
-      value = fit_result$value,
-      counts = fit_result$counts,
-      convergence = fit_result$convergence,
-      message = fit_result$message,
-      hessian = fit_result$hessian
-    )
-
-    if (fit$convergence > 0) warning("optimization failed to converge")
-
-    # Extract coefficients
-    coefc <- fit$par[1:kx]
-    coefz <- fit$par[(kx + 1 + 1):(kx + kz + 1)]
-
-    # Calculate covariance matrix
-    vc <- tryCatch(solve(as.matrix(fit$hessian)),
-      error = function(e) {
-        warning(e$message, call = FALSE)
-        k <- nrow(as.matrix(fit$hessian))
-        return(matrix(NA, k, k))
-      }
-    )
-
-    # Extract theta parameters and standard errors
-    np <- kx + 1
-
-    theta <- c(count = as.vector(exp(fit$par[np])))
-    diag_val <- diag(vc)[np]
-    SE.logtheta <- if (is.na(diag_val) || diag_val <= 0) NA_real_ else as.vector(sqrt(diag_val))
-    names(SE.logtheta) <- "count"
-    vc <- vc[-np, -np, drop = FALSE]
-
-    # Calculate loglik and convergence
-    loglik <- fit$value
-    converged <- fit$convergence < 1
+  # Resolve score_test column index
+  test_idx <- NULL
+  if (!is.null(score_test)) {
+    if (!is.character(score_test) || length(score_test) != 1) {
+      stop("score_test must be a single column name (character)")
+    }
+    test_idx <- match(score_test, colnames(X))
+    if (is.na(test_idx)) {
+      stop("score_test column '", score_test, "' not found in X")
+    }
+    if (!separate) {
+      warning("separate = FALSE is ignored when score_test is used")
+    }
+    if (compute_fitted) {
+      warning("compute_fitted is not available with score_test; ignoring")
+      compute_fitted <- FALSE
+    }
   }
 
-  # Set coefficient names
+  reltol <- .Machine$double.eps^(1 / 1.6)
+  control <- list(
+    method = method, maxit = maxit, fnscale = -1,
+    reltol = reltol, hessian = TRUE
+  )
+
+  # ====================================================================
+  # Count component estimation
+  # ====================================================================
+  if (!is.null(test_idx)) {
+    # --- Score test mode: fit null model only ---
+    null_idx <- setdiff(seq_len(kx), test_idx)
+    X_null <- X[, null_idx, drop = FALSE]
+    x_test <- X[, test_idx, drop = FALSE]
+
+    # Fit or reuse null model
+    if (is.null(null_fit_count)) {
+      null_fit_count <- fit_null_count(X_null, y,
+        offsetx = offsetx, weights = weights,
+        dist = "negbin", method = method, maxit = maxit
+      )
+    }
+
+    # Compute score test
+    st_result <- score_test_count(
+      X_null, x_test, y,
+      offsetx = offsetx, weights = weights,
+      dist = "negbin", null_fit_count = null_fit_count, spa_cutoff = spa_cutoff
+    )
+
+    # Build count coefficients: null MLE for covariates, score for test
+    kx_null <- length(null_idx)
+    coefc <- numeric(kx)
+    coefc[null_idx] <- null_fit_count$par[seq_len(kx_null)]
+    coefc[test_idx] <- st_result$beta
+
+    # Theta from null model
+    theta <- c(count = as.vector(exp(null_fit_count$par[kx_null + 1])))
+    SE.logtheta <- c(count = NA_real_)
+
+    # Use null model loglik (covariate vcov is NA in score test mode)
+    null_loglik <- null_fit_count$value
+    vc_count <- matrix(NA_real_, kx, kx)
+    for (j in seq_along(test_idx)) {
+      vc_count[test_idx[j], test_idx[j]] <- st_result$se[j]^2
+    }
+
+    fit <- list(
+      count = list(par = null_fit_count$par, convergence = null_fit_count$convergence),
+      zero = NULL
+    )
+    converged_count <- null_fit_count$convergence == 0
+  } else {
+    # --- Standard Wald mode: fit full count model ---
+    pos_idx <- y > 0
+    model_count <- tryCatch(
+      fastglm::fastglm(
+        X[pos_idx, , drop = FALSE], y[pos_idx],
+        family = poisson(),
+        weights = weights[pos_idx], offset = offsetx[pos_idx]
+      ),
+      error = function(e) NULL
+    )
+    if (is.null(model_count) || any(!is.finite(model_count$coefficients))) {
+      pos_mean <- if (any(pos_idx)) mean(log(y[pos_idx] + 0.5) - offsetx[pos_idx]) else 0
+      start_count <- c(pos_mean, rep(0, kx - 1), log(1))
+    } else {
+      start_count <- c(model_count$coefficients, log(1))
+    }
+
+    if (separate) {
+      fit_count <- optim_count_negbin_cpp(
+        start = start_count, Y = y, X = X, offsetx = offsetx, weights = weights,
+        method = method, hessian = TRUE, maxit = maxit, reltol = reltol
+      )
+    } else {
+      model_zero <- suppressWarnings(fastglm::fastglm(
+        Z, as.integer(y > 0),
+        family = binomial(link = linkstr),
+        weights = weights, offset = offsetz
+      ))
+      fit_result <- optim_joint_cpp(
+        start = c(model_count$coefficients, log(1), model_zero$coefficients),
+        Y = y, X = X, offsetx = offsetx, Z = Z, offsetz = offsetz, weights = weights,
+        dist = dist, zero_dist = zero.dist, link = linkstr,
+        method = method, hessian = TRUE, maxit = maxit, reltol = reltol
+      )
+      if (fit_result$convergence > 0) warning("optimization failed to converge")
+      # Extract from joint fit
+      coefc <- fit_result$par[1:kx]
+      coefz_joint <- fit_result$par[(kx + 2):(kx + kz + 1)]
+      vc_joint <- tryCatch(solve(as.matrix(fit_result$hessian)),
+        error = function(e) {
+          warning(e$message, call. = FALSE)
+          matrix(NA, nrow(as.matrix(fit_result$hessian)), ncol(as.matrix(fit_result$hessian)))
+        }
+      )
+      np <- kx + 1
+      theta <- c(count = as.vector(exp(fit_result$par[np])))
+      diag_val <- diag(vc_joint)[np]
+      SE.logtheta <- c(count = if (is.na(diag_val) || diag_val <= 0) NA_real_ else as.vector(sqrt(diag_val)))
+      vc_joint <- vc_joint[-np, -np, drop = FALSE]
+      names(coefc) <- colnames(X)
+      names(coefz_joint) <- colnames(Z)
+      vc_count <- vc_joint[1:kx, 1:kx, drop = FALSE]
+      loglik <- fit_result$value
+      converged_count <- fit_result$convergence < 1
+      # Will assemble full vc below after zero model
+    }
+
+    if (separate) {
+      coefc <- fit_count$par[1:kx]
+      theta <- c(count = as.vector(exp(fit_count$par[kx + 1])))
+      vc_count_full <- tryCatch(solve(as.matrix(fit_count$hessian)),
+        error = function(e) {
+          warning(e$message, call. = FALSE)
+          matrix(NA, nrow(as.matrix(fit_count$hessian)), ncol(as.matrix(fit_count$hessian)))
+        }
+      )
+      diag_val <- diag(vc_count_full)[kx + 1]
+      SE.logtheta <- c(count = if (is.na(diag_val) || diag_val <= 0) NA_real_ else as.vector(sqrt(diag_val)))
+      vc_count <- vc_count_full[-(kx + 1), -(kx + 1), drop = FALSE]
+      null_loglik <- fit_count$value
+      converged_count <- fit_count$convergence < 1
+    }
+
+    if (separate) {
+      fit <- list(count = fit_count, zero = NULL)
+    } else {
+      # Mark zero as done so we don't re-fit below (coefz extracted from joint)
+      fit <- list(joint = fit_result, zero = list(convergence = fit_result$convergence))
+    }
+    st_result <- NULL
+  }
+
+  # ====================================================================
+  # Zero component estimation (always Wald)
+  # ====================================================================
+  # ====================================================================
+  # Zero component: score test or Wald
+  # ====================================================================
+  st_result_zero <- NULL
+  if (!is.null(test_idx) && score_test %in% colnames(Z)) {
+    # --- Zero score test mode ---
+    zero_test_idx <- match(score_test, colnames(Z))
+    zero_null_idx <- setdiff(seq_len(kz), zero_test_idx)
+    Z_null_zero <- Z[, zero_null_idx, drop = FALSE]
+    z_test_col <- Z[, zero_test_idx, drop = FALSE]
+
+    if (is.null(null_fit_zero)) {
+      null_fit_zero <- fit_null_zero(Z_null_zero, y,
+        offsetz = offsetz, weights = weights,
+        method = method, maxit = maxit
+      )
+    }
+
+    st_result_zero <- score_test_zero(
+      Z_null_zero, z_test_col, y,
+      offsetz = offsetz, weights = weights,
+      null_fit_zero = null_fit_zero, spa_cutoff = spa_cutoff
+    )
+
+    kz_null_zero <- length(zero_null_idx)
+    coefz <- numeric(kz)
+    coefz[zero_null_idx] <- null_fit_zero$par[seq_len(kz_null_zero)]
+    coefz[zero_test_idx] <- st_result_zero$beta
+
+    null_loglik_zero <- null_fit_zero$value
+    vc_zero <- matrix(NA_real_, kz, kz)
+    vc_zero[zero_test_idx, zero_test_idx] <- st_result_zero$se^2
+
+    fit$zero <- list(convergence = null_fit_zero$convergence)
+  } else if (is.null(fit$zero)) {
+    # --- Wald mode ---
+    model_zero_start <- tryCatch(
+      suppressWarnings(fastglm::fastglm(
+        Z, as.integer(y > 0),
+        family = binomial(link = linkstr),
+        weights = weights, offset = offsetz
+      )),
+      error = function(e) NULL
+    )
+    zero_start <- if (!is.null(model_zero_start) &&
+      all(is.finite(model_zero_start$coefficients))) {
+      model_zero_start$coefficients
+    } else {
+      rep(0, kz)
+    }
+    fit_zero <- optim_zero_binom_cpp(
+      start = zero_start,
+      Y = y, X = Z, offsetx = offsetz, weights = weights, link = linkstr,
+      method = method, hessian = TRUE, maxit = maxit, reltol = reltol
+    )
+    fit$zero <- fit_zero
+  }
+
+  if (!is.null(fit$joint)) {
+    coefz <- coefz_joint
+    vc_zero <- vc_joint[(kx + 1):(kx + kz), (kx + 1):(kx + kz), drop = FALSE]
+    null_loglik_zero <- NULL
+  } else if (is.null(st_result_zero)) {
+    # Wald path
+    coefz <- fit$zero$par[1:kz]
+    null_loglik_zero <- NULL
+    vc_zero <- tryCatch(solve(as.matrix(fit$zero$hessian)),
+      error = function(e) {
+        warning(e$message, call. = FALSE)
+        matrix(NA, nrow(as.matrix(fit$zero$hessian)), ncol(as.matrix(fit$zero$hessian)))
+      }
+    )
+  }
+
+  # ====================================================================
+  # Assemble return object
+  # ====================================================================
   names(coefc) <- colnames(X)
   names(coefz) <- colnames(Z)
+
+  # Combined vcov
+  if (!is.null(fit$joint)) {
+    # Joint mode: vcov already includes both count and zero
+    vc <- vc_joint
+  } else {
+    vc <- rbind(
+      cbind(vc_count, matrix(NA_real_, kx, kz)),
+      cbind(matrix(NA_real_, kz, kx), vc_zero)
+    )
+    # For Wald mode (no score test), use 0 for cross-terms (independent estimation)
+    if (is.null(test_idx)) {
+      vc[1:kx, (kx + 1):(kx + kz)] <- 0
+      vc[(kx + 1):(kx + kz), 1:kx] <- 0
+    }
+  }
   colnames(vc) <- rownames(vc) <- c(
     paste("count", colnames(X), sep = "_"),
     paste("zero", colnames(Z), sep = "_")
   )
 
-  # Calculate fitted values and residuals in C++
+  # loglik
+  if (!is.null(test_idx)) {
+    zero_ll <- if (!is.null(null_loglik_zero)) null_loglik_zero else fit$zero$value
+    loglik <- null_loglik + zero_ll
+  } else if (separate) {
+    loglik <- null_loglik + fit$zero$value
+  }
+  # (joint mode loglik already set above)
+
+  # Check convergence: null models + score test results (NA = failure)
+  converged <- converged_count & (fit$zero$convergence < 1)
+  if (!is.null(st_result) && any(is.na(st_result$pvalue))) converged <- FALSE
+  if (!is.null(st_result_zero) && any(is.na(st_result_zero$pvalue))) converged <- FALSE
+
+  # Fitted values
+  Yhat <- res <- NULL
   if (compute_fitted) {
     fitted_result <- compute_negbin_hurdle_fitted_cpp(
       coefc, coefz, X, Z, offsetx, offsetz, theta["count"], y
@@ -210,15 +378,10 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, m
     Yhat <- fitted_result$fitted.values
     names(Yhat) <- rownames(X)
     res <- fitted_result$residuals
-  } else {
-    Yhat <- NULL
-    res <- NULL
   }
 
-  # Calculate effective observations
   nobs <- sum(weights > 0)
 
-  # Create return object
   rval <- list(
     coefficients = list(count = coefc, zero = coefz),
     residuals = res,
@@ -226,7 +389,7 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, m
     optim = fit,
     method = method,
     control = control,
-    start = start,
+    start = NULL,
     weights = NULL,
     offset = list(
       count = if (all(offsetx == 0)) NULL else offsetx,
@@ -234,7 +397,12 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, m
     ),
     n = nobs,
     df.null = nobs - 2,
-    df.residual = nobs - (kx + kz + 1), # +1 for the count theta parameter
+    df.residual = if (!is.null(test_idx)) {
+      kz_null_used <- if (!is.null(st_result_zero)) length(zero_null_idx) else kz
+      nobs - (length(null_idx) + kz_null_used + 1)
+    } else {
+      nobs - (kx + kz + 1)
+    },
     theta = theta,
     SE.logtheta = SE.logtheta,
     loglik = loglik,
@@ -242,7 +410,9 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, m
     dist = list(count = dist, zero = zero.dist),
     link = linkstr,
     linkinv = linkinv,
-    separate = separate,
+    separate = if (!is.null(fit$joint)) FALSE else TRUE,
+    score_test_count = st_result,
+    score_test_zero = st_result_zero,
     converged = converged,
     call = match.call(),
     y = if (compute_fitted) y else NULL,
@@ -250,5 +420,5 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL, m
   )
 
   class(rval) <- "fasthurdle"
-  return(rval)
+  rval
 }

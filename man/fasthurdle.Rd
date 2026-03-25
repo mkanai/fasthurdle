@@ -15,6 +15,10 @@ fasthurdle(
   zero.dist = c("binomial", "poisson", "negbin", "geometric"),
   link = c("logit", "probit", "cloglog", "cauchit", "log"),
   control = hurdle.control(...),
+  score_test = NULL,
+  null_fit_count = NULL,
+  null_fit_zero = NULL,
+  spa_cutoff = NULL,
   model = TRUE,
   y = TRUE,
   x = FALSE,
@@ -48,6 +52,23 @@ Currently, "logit", "probit", "cloglog", "cauchit", and "log" are supported.}
 
 \item{control}{A list of control parameters passed to the optimizer. See \code{\link{hurdle.control}}.}
 
+\item{score_test}{Optional. Column name of the variable to compute a score test for
+in both the count and zero components. The score test evaluates significance at the
+null MLE, giving better-calibrated p-values and faster computation. For significant
+tests, beta is refined via a short BFGS optimization from the score estimate. See Details.}
+
+\item{null_fit_count}{Optional. A pre-fitted count null model from \code{\link{fit_null_count}}.
+When provided with \code{score_test}, the count null is not re-fitted.}
+
+\item{null_fit_zero}{Optional. A pre-fitted zero null model from \code{\link{fit_null_zero}}.
+When provided with \code{score_test}, the zero null is not re-fitted. Only supported
+with \code{zero.dist = "binomial"} and \code{link = "logit"}.}
+
+\item{spa_cutoff}{Numeric or NULL. When \code{score_test} is used, apply saddlepoint
+approximation (SPA) for p-values when |z| exceeds this cutoff. Default is
+\code{NULL} (disabled). Set to \code{2} to enable SPA for improved tail
+accuracy at small sample sizes (n < 50K).}
+
 \item{model}{Logical. If TRUE, the model frame is included in the returned object.}
 
 \item{y}{Logical. If TRUE, the response vector is included in the returned object.}
@@ -58,6 +79,8 @@ Currently, "logit", "probit", "cloglog", "cauchit", and "log" are supported.}
 }
 \value{
 An object of class "fasthurdle" representing the fitted model.
+  When \code{score_test} is used, \code{$score_test_count} and \code{$score_test_zero}
+  contain the score test results (beta, se, statistic, pvalue) for each component.
 }
 \description{
 Fits hurdle regression models for count data. The hurdle model combines a count data model
@@ -75,6 +98,22 @@ f_{zero}(0) & \text{if } y = 0 \\
 \end{cases}}
 
 where \eqn{f_{zero}} is the zero hurdle distribution and \eqn{f_{count}} is the count distribution.
+
+## Score test mode
+
+When \code{score_test} is specified, the full count model is still fitted (unlike
+\code{\link{fast_negbin_hurdle}} which skips the full model for speed). The score test
+results are stored in the \code{$score_test_count} and \code{$score_test_zero} slots alongside
+the standard Wald results. This allows comparison between the two testing approaches.
+
+The count score test uses the observed information (negative Hessian) instead of the
+expected Fisher information, making it robust to model misspecification. Available for
+all count distributions (negbin, poisson, geometric). The zero score test uses the
+expected FIM with SPA (binomial/logit only), which is already well-calibrated.
+
+For significant tests (|z| > \code{spa_cutoff}, or |z| > 2 when SPA is disabled),
+beta is refined via 5-iteration BFGS from the score estimate (within ~3\% of the
+full MLE). SE is back-computed from the p-value for consistency.
 }
 \examples{
 \dontrun{

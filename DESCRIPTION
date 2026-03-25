@@ -1,8 +1,8 @@
 Package: fasthurdle
 Type: Package
 Title: Fast Implementation of Hurdle Models
-Version: 1.1.1
-Date: 2026-03-09
+Version: 1.2.0
+Date: 2026-03-25
 Authors@R: person("Masahiro", "Kanai", email = "mkanai@broadinstitute.org",
     role = c("aut", "cre"))
 Description: Provides fast hurdle regression models for count data using C++

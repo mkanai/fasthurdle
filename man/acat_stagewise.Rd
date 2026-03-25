@@ -32,14 +32,14 @@ A data.frame with columns:
   \item{p_adj_count}{Holm-adjusted count-model p-value (NA if not selected).}
   \item{sig_zero}{Logical; zero component significant after Holm correction.}
   \item{sig_count}{Logical; count component significant after Holm correction.}
-  \item{mechanism}{Factor classifying the link as "dual", "switch",
-    "rheostat", "omnibus_only", or "not_significant".}
-  \item{sig}{Logical; TRUE if mechanism is not "not_significant".}
+  \item{mode}{Factor classifying the regulatory mode as "dual", "switch",
+    "rheostat", "joint_only", or "not_significant".}
+  \item{sig}{Logical; TRUE if mode is not "not_significant".}
 }
 \description{
 Combines zero-inflation and count model p-values using the Cauchy
 combination test (CCT/ACAT) for omnibus screening, then applies stage-wise
-confirmation via the Holm procedure to classify the regulatory mechanism.
+confirmation via the Holm procedure to classify the regulatory mode.
 This provides overall FDR control at the screening level with family-wise
 error rate control within each selected pair.
 }

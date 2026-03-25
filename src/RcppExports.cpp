@@ -11,6 +11,21 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// compute_ztnb_fisher_info_cpp
+arma::mat compute_ztnb_fisher_info_cpp(const arma::vec& beta, double theta, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights);
+RcppExport SEXP _fasthurdle_compute_ztnb_fisher_info_cpp(SEXP betaSEXP, SEXP thetaSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::vec& >::type beta(betaSEXP);
+    Rcpp::traits::input_parameter< double >::type theta(thetaSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type X(XSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type offsetx(offsetxSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type weights(weightsSEXP);
+    rcpp_result_gen = Rcpp::wrap(compute_ztnb_fisher_info_cpp(beta, theta, X, offsetx, weights));
+    return rcpp_result_gen;
+END_RCPP
+}
 // optim_count_poisson_cpp
 Rcpp::List optim_count_poisson_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights, const std::string& method, bool hessian, int maxit, double reltol);
 RcppExport SEXP _fasthurdle_optim_count_poisson_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP methodSEXP, SEXP hessianSEXP, SEXP maxitSEXP, SEXP reltolSEXP) {
@@ -169,6 +184,43 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// score_test_count_cpp
+Rcpp::List score_test_count_cpp(const arma::vec& null_par, const arma::vec& Y, const arma::mat& X_null, const arma::mat& X_full, const arma::vec& offsetx, const arma::vec& weights, const std::string& dist, bool use_spa, double spa_cutoff);
+RcppExport SEXP _fasthurdle_score_test_count_cpp(SEXP null_parSEXP, SEXP YSEXP, SEXP X_nullSEXP, SEXP X_fullSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP distSEXP, SEXP use_spaSEXP, SEXP spa_cutoffSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::vec& >::type null_par(null_parSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type Y(YSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type X_null(X_nullSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type X_full(X_fullSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type offsetx(offsetxSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type weights(weightsSEXP);
+    Rcpp::traits::input_parameter< const std::string& >::type dist(distSEXP);
+    Rcpp::traits::input_parameter< bool >::type use_spa(use_spaSEXP);
+    Rcpp::traits::input_parameter< double >::type spa_cutoff(spa_cutoffSEXP);
+    rcpp_result_gen = Rcpp::wrap(score_test_count_cpp(null_par, Y, X_null, X_full, offsetx, weights, dist, use_spa, spa_cutoff));
+    return rcpp_result_gen;
+END_RCPP
+}
+// score_test_zero_cpp
+Rcpp::List score_test_zero_cpp(const arma::vec& null_par, const arma::vec& Y, const arma::mat& Z_null, const arma::mat& Z_full, const arma::vec& offsetz, const arma::vec& weights, bool use_spa, double spa_cutoff);
+RcppExport SEXP _fasthurdle_score_test_zero_cpp(SEXP null_parSEXP, SEXP YSEXP, SEXP Z_nullSEXP, SEXP Z_fullSEXP, SEXP offsetzSEXP, SEXP weightsSEXP, SEXP use_spaSEXP, SEXP spa_cutoffSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::vec& >::type null_par(null_parSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type Y(YSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type Z_null(Z_nullSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type Z_full(Z_fullSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type offsetz(offsetzSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type weights(weightsSEXP);
+    Rcpp::traits::input_parameter< bool >::type use_spa(use_spaSEXP);
+    Rcpp::traits::input_parameter< double >::type spa_cutoff(spa_cutoffSEXP);
+    rcpp_result_gen = Rcpp::wrap(score_test_zero_cpp(null_par, Y, Z_null, Z_full, offsetz, weights, use_spa, spa_cutoff));
+    return rcpp_result_gen;
+END_RCPP
+}
 // compute_negbin_hurdle_fitted_cpp
 Rcpp::List compute_negbin_hurdle_fitted_cpp(const arma::vec& coefc, const arma::vec& coefz, const arma::mat& X, const arma::mat& Z, const arma::vec& offsetx, const arma::vec& offsetz, double theta, const arma::vec& y);
 RcppExport SEXP _fasthurdle_compute_negbin_hurdle_fitted_cpp(SEXP coefcSEXP, SEXP coefzSEXP, SEXP XSEXP, SEXP ZSEXP, SEXP offsetxSEXP, SEXP offsetzSEXP, SEXP thetaSEXP, SEXP ySEXP) {
@@ -189,6 +241,7 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_fasthurdle_compute_ztnb_fisher_info_cpp", (DL_FUNC) &_fasthurdle_compute_ztnb_fisher_info_cpp, 5},
     {"_fasthurdle_optim_count_poisson_cpp", (DL_FUNC) &_fasthurdle_optim_count_poisson_cpp, 9},
     {"_fasthurdle_optim_count_negbin_cpp", (DL_FUNC) &_fasthurdle_optim_count_negbin_cpp, 9},
     {"_fasthurdle_optim_count_geom_cpp", (DL_FUNC) &_fasthurdle_optim_count_geom_cpp, 9},
@@ -197,6 +250,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fasthurdle_optim_zero_geom_cpp", (DL_FUNC) &_fasthurdle_optim_zero_geom_cpp, 9},
     {"_fasthurdle_optim_zero_binom_cpp", (DL_FUNC) &_fasthurdle_optim_zero_binom_cpp, 10},
     {"_fasthurdle_optim_joint_cpp", (DL_FUNC) &_fasthurdle_optim_joint_cpp, 14},
+    {"_fasthurdle_score_test_count_cpp", (DL_FUNC) &_fasthurdle_score_test_count_cpp, 9},
+    {"_fasthurdle_score_test_zero_cpp", (DL_FUNC) &_fasthurdle_score_test_zero_cpp, 8},
     {"_fasthurdle_compute_negbin_hurdle_fitted_cpp", (DL_FUNC) &_fasthurdle_compute_negbin_hurdle_fitted_cpp, 8},
     {NULL, NULL, 0}
 };

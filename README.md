@@ -68,11 +68,32 @@ summary(model)
 
 **Note:** `fasthurdle` uses OpenMP multithreading for improved performance. Control the number of threads using the `OMP_NUM_THREADS` environment variable. When fitting many models, avoid additional parallelization (e.g., with `parallel` or `future`) to prevent oversubscription.
 
+## Score test
+
+The **score test** evaluates significance at the null model — it does not fit the full count model, making it both faster (~2x with cached nulls) and robust to model misspecification. The score test is available for all count distributions (negbin, poisson, geometric).
+
+The count component uses the **observed information** (analytical negative Hessian) instead of the expected Fisher information. This makes the score test robust to distributional misspecification — it matches Wald test calibration even when the NB model is not perfectly specified (e.g., ambient RNA contamination, non-NB count distributions). The zero component uses the expected FIM, which is identical to the observed information for the binomial/logit model (a property of canonical GLMs).
+
+For significant tests (|z| > 2), beta is refined via a short BFGS optimization, giving accuracy within ~3% of the full MLE. The `summary()` output format is unchanged.
+
+**SPA** (saddlepoint approximation) is available via `spa_cutoff = 2` for improved tail p-value accuracy, primarily useful for sparse genes at small sample sizes (n < 50K).
+
+```r
+# Score test for x — just add score_test
+model <- fasthurdle(y ~ x | z, data = df, dist = "negbin", zero.dist = "binomial",
+                    score_test = "x")
+summary(model)  # same format, score-test p-value for x
+
+# With SPA for small-n studies
+model <- fasthurdle(y ~ x | z, data = df, dist = "negbin", zero.dist = "binomial",
+                    score_test = "x", spa_cutoff = 2)
+```
+
 ## Peak-gene link analysis
 
 Hurdle models are well-suited for analyzing peak-gene associations in single-nucleus multiome data (scRNA-seq + scATAC-seq), as originally introduced in [Open4Gene](https://github.com/hbliu/Open4Gene). The two-part hurdle model independently fits: (1) a binomial zero-inflation model testing whether peak accessibility affects the probability of nonzero expression, and (2) a negative binomial count model testing whether peak accessibility affects expression magnitude among expressing cells. This approach explicitly accounts for technical and biological sparsity while modeling the count-based nature of expression measurements with overdispersion.
 
-### Using `fasthurdle` with formula interface
+### Wald test (Open4Gene default)
 
 ```r
 library(fasthurdle)
@@ -95,9 +116,8 @@ df <- data.frame(
   pct_counts_mito = pct_counts_mito
 )
 
-# Fit hurdle model with negative binomial count model and binomial zero hurdle
-# Use log_total_counts as offset in count model (modeling rates) and covariate in zero model
-# Note: You can also use other distributions as needed (dist: "poisson", "geometric"; zero.dist: "poisson", "negbin", "geometric")
+# Fit hurdle model with NB count and binomial zero hurdle
+# Use log_total_counts as offset in count model and covariate in zero model
 model <- fasthurdle(
   gene_expr ~ peak_acc + pct_counts_mito + offset(log_total_counts) | peak_acc + log_total_counts + pct_counts_mito,
   data = df,
@@ -106,46 +126,54 @@ model <- fasthurdle(
 )
 
 # Extract results
-model_summary <- summary(model)
-
-# Get coefficients for peak accessibility
-peak_coef_zero <- model_summary$coefficients$zero["peak_acc", ]    # Zero hurdle component
-peak_coef_count <- model_summary$coefficients$count["peak_acc", ]  # Count component
-
-# Extract specific statistics
-beta_zero <- peak_coef_zero[1]    # Coefficient (log-odds of nonzero expression per unit increase in peak accessibility)
-se_zero <- peak_coef_zero[2]      # Standard error
-z_zero <- peak_coef_zero[3]       # Z-statistic
-p_zero <- peak_coef_zero[4]       # P-value
-
-beta_count <- peak_coef_count[1]  # Coefficient (change in log gene expression rate per unit increase in peak accessibility)
-se_count <- peak_coef_count[2]    # Standard error
-z_count <- peak_coef_count[3]     # Z-statistic
-p_count <- peak_coef_count[4]     # P-value
-
-# Model fit statistics
-aic <- AIC(model)
-bic <- BIC(model)
+s <- summary(model)
+s$coefficients$count["peak_acc", ]  # Count: beta, SE, z, p-value
+s$coefficients$zero["peak_acc", ]   # Zero: beta, SE, z, p-value
 ```
 
-### Using `fast_negbin_hurdle` for high-performance analysis
-
-For large-scale peak-gene pair testing, use `fast_negbin_hurdle`, which provides the best performance by directly accepting a model matrix and skipping formula processing:
+For high-performance analysis, `fast_negbin_hurdle` accepts model matrices directly and skips formula processing:
 
 ```r
-library(fasthurdle)
-
-# Prepare model matrices and response
-# Count model: peak_acc + covariates, with log_total_counts as offset
 X <- model.matrix(~ peak_acc + pct_counts_mito, data = df)
 y <- df$gene_expr
 offsetx <- df$log_total_counts
-
-# Zero model: peak_acc + covariates, with log_total_counts as a free covariate
 Z <- model.matrix(~ peak_acc + log_total_counts + pct_counts_mito, data = df)
 
-# Fit the model (same result extraction as fasthurdle above)
 model <- fast_negbin_hurdle(X, y, Z = Z, offsetx = offsetx)
+```
+
+### Score test (recommended)
+
+The score test gives better-calibrated p-values and is faster. Just add `score_test`:
+
+```r
+model <- fast_negbin_hurdle(X, y, Z = Z, offsetx = offsetx, score_test = "peak_acc")
+s <- summary(model)
+s$coefficients$count["peak_acc", ]  # Score test: beta, SE, z, p-value
+s$coefficients$zero["peak_acc", ]   # Score test: beta, SE, z, p-value
+```
+
+For high-throughput testing (many peaks per gene), both null models can be fitted once and reused:
+
+```r
+# Fit nulls once per gene (covariates only, no peak_acc)
+X_null <- model.matrix(~ pct_counts_mito, data = df)
+Z_null <- model.matrix(~ log_total_counts + pct_counts_mito, data = df)
+null_fit_count <- fit_null_count(X_null, y, offsetx = offsetx, dist = "negbin")
+null_fit_zero <- fit_null_zero(Z_null, y)
+
+# Test each peak against cached nulls
+for (peak in peaks) {
+  X <- cbind(X_null, df[[peak]])
+  colnames(X)[ncol(X)] <- peak
+  Z <- cbind(Z_null, df[[peak]])
+  colnames(Z)[ncol(Z)] <- peak
+  model <- fast_negbin_hurdle(X, y, Z = Z, offsetx = offsetx,
+                               score_test = peak,
+                               null_fit_count = null_fit_count,
+                               null_fit_zero = null_fit_zero)
+  # Extract results from summary(model)
+}
 ```
 
 ## Benchmark Results
@@ -185,12 +213,17 @@ The use of hurdle models for peak-gene link analysis in single-nucleus multiome 
 
 ## Changelog
 
+### v1.2.0 (2026-03-25)
+
+- **New feature**: Score test with observed information for count and zero components. See [Score test](#score-test-recommended) section above.
+- **New feature**: Joint 2-df chi-squared score test (`joint_score_test()`) for omnibus peak-gene testing.
+
 ### v1.1.1 (2026-03-09)
 
 - **New feature**: Added statistical utilities for hurdle model p-value combination and FDR control:
   - `CCT()`: Cauchy Combination Test (ACAT) for combining p-values under arbitrary dependency structures.
   - `jiang_doerge_fdr()`: Two-stage FDR procedure for hurdle models, screening on one component and confirming on the other.
-  - `acat_stagewise()`: ACAT-based omnibus screening with stage-wise Holm confirmation, classifying regulatory mechanisms as "dual", "switch", "rheostat", or "omnibus_only".
+  - `acat_stagewise()`: ACAT-based omnibus screening with stage-wise Holm confirmation, classifying regulatory modes as "dual", "switch", "rheostat", or "omnibus_only".
 
 ### v1.1.0 (2026-03-05)
 
