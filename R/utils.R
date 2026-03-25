@@ -254,8 +254,8 @@ acat_stagewise <- function(p_zero, p_count, alpha = 0.05,
 #' @importFrom stats pchisq p.adjust
 #' @export
 joint_score_test <- function(chisq_zero, chisq_count,
-                              alpha = 0.05,
-                              pi0.method = c("smoother", "bootstrap")) {
+                             alpha = 0.05,
+                             pi0.method = c("smoother", "bootstrap")) {
   pi0.method <- match.arg(pi0.method)
   n <- length(chisq_zero)
   if (length(chisq_count) != n) {
@@ -269,7 +269,8 @@ joint_score_test <- function(chisq_zero, chisq_count,
   # Valid because zero and count scores are independent under factorized hurdle
   chisq_joint <- chisq_zero + chisq_count
   p_joint <- ifelse(is.na(chisq_joint), NA_real_,
-                     pchisq(chisq_joint, df = 2, lower.tail = FALSE))
+    pchisq(chisq_joint, df = 2, lower.tail = FALSE)
+  )
 
   # FDR control via qvalue (fall back to BH if qvalue fails, e.g., all p < lambda)
   q_joint <- rep(NA_real_, n)

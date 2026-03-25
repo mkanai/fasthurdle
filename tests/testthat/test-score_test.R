@@ -412,27 +412,37 @@ test_that("observed info score test is calibrated under spike-at-1 misspecificat
     Z <- model.matrix(~ peak_acc + log_tc + pct_mito)
     fw <- tryCatch(
       suppressWarnings(fast_negbin_hurdle(X, y, Z = Z, offsetx = log_tc)),
-      error = function(e) NULL)
+      error = function(e) NULL
+    )
     fs <- tryCatch(
-      suppressWarnings(fast_negbin_hurdle(X, y, Z = Z, offsetx = log_tc,
-                                          score_test = "peak_acc",
-                                          spa_cutoff = NULL)),
-      error = function(e) NULL)
+      suppressWarnings(fast_negbin_hurdle(X, y,
+        Z = Z, offsetx = log_tc,
+        score_test = "peak_acc",
+        spa_cutoff = NULL
+      )),
+      error = function(e) NULL
+    )
     pvals_wald[i] <- if (!is.null(fw)) {
       summary(fw)$coefficients$count["peak_acc", "Pr(>|z|)"]
-    } else NA
+    } else {
+      NA
+    }
     pvals_score[i] <- if (!is.null(fs)) {
       summary(fs)$coefficients$count["peak_acc", "Pr(>|z|)"]
-    } else NA
+    } else {
+      NA
+    }
   }
   fpr_wald <- mean(pvals_wald[!is.na(pvals_wald)] < 0.05)
   fpr_score <- mean(pvals_score[!is.na(pvals_score)] < 0.05)
   # Score FPR should be within 10% of Wald FPR (both may be mildly inflated)
   expect_true(abs(fpr_score - fpr_wald) < 0.10,
-              info = sprintf("Score FPR=%.3f, Wald FPR=%.3f", fpr_score, fpr_wald))
+    info = sprintf("Score FPR=%.3f, Wald FPR=%.3f", fpr_score, fpr_wald)
+  )
   # Neither should be catastrophically inflated (< 25%)
   expect_true(fpr_score < 0.25,
-              info = sprintf("Score FPR=%.3f too high", fpr_score))
+    info = sprintf("Score FPR=%.3f too high", fpr_score)
+  )
 })
 
 # ==========================================================================
@@ -470,8 +480,8 @@ test_that("score test handles extreme theta (near-Poisson)", {
   colnames(X_null) <- "(Intercept)"
   r <- score_test_count(X_null, x, y, dist = "negbin", spa_cutoff = NULL)
   expect_true(!is.na(r$pvalue))
-  expect_true(r$pvalue < 0.05)  # true effect, should detect
-  expect_true(r$beta[1] > 0)    # correct sign
+  expect_true(r$pvalue < 0.05) # true effect, should detect
+  expect_true(r$beta[1] > 0) # correct sign
 })
 
 test_that("score test handles high overdispersion (theta near 0)", {
@@ -494,7 +504,7 @@ test_that("observed info falls back to expected FIM when Hessian is non-finite",
   set.seed(42)
   n <- 500
   x <- rnorm(n)
-  y <- rbinom(n, 1, 0.3)  # all positives are exactly 1
+  y <- rbinom(n, 1, 0.3) # all positives are exactly 1
   X_null <- matrix(1, n, 1)
   colnames(X_null) <- "(Intercept)"
   # Should not error — falls back to expected FIM or returns NA
@@ -517,12 +527,15 @@ test_that("joint_score_test produces valid output from statistics", {
   res <- joint_score_test(chisq_zero, chisq_count)
   expect_s3_class(res, "data.frame")
   expect_equal(nrow(res), n)
-  expect_true(all(c("chisq_joint", "p_joint", "q_joint", "selected",
-                     "p_adj_zero", "p_adj_count", "sig_zero", "sig_count",
-                     "mode", "sig") %in% names(res)))
+  expect_true(all(c(
+    "chisq_joint", "p_joint", "q_joint", "selected",
+    "p_adj_zero", "p_adj_count", "sig_zero", "sig_count",
+    "mode", "sig"
+  ) %in% names(res)))
   expect_equal(res$chisq_joint, chisq_zero + chisq_count, tolerance = 1e-10)
   expect_equal(res$p_joint, pchisq(res$chisq_joint, 2, lower.tail = FALSE),
-               tolerance = 1e-10)
+    tolerance = 1e-10
+  )
 })
 
 test_that("joint_score_test is more powerful than individual tests for dual signals", {

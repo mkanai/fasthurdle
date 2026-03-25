@@ -692,15 +692,16 @@ arma::mat compute_ztnb_observed_info_analytical(const arma::vec &beta,
 // Computes BOTH the score statistic U_test and the observed Hessian components
 // in a single pass over the data. This eliminates:
 // 1. Duplicate eta/mu computation (gradient + Hessian computed them separately)
-// 2. The full kx-vector DGEMV for the gradient (only need scalar dot for test var)
+// 2. The full kx-vector DGEMV for the gradient (only need scalar dot for test
+// var)
 // 3. Separate log_p0/p0/r computation in the gradient
 // Returns pre-computed mu/p0/log_p1 for optional SPA cache reuse (Phase 4).
 struct ScoreAndHessianResult {
-  double U_test;           // Score for test variable (d logL / d beta_test)
-  ZtnbFimResult hess;      // Hessian components (v_ee, v_et, v_tt_sum)
-  arma::vec mu_pos;        // Pre-computed mu per obs (for SPA cache)
-  arma::vec p0_pos;        // Pre-computed p0 per obs
-  arma::vec log_p1_pos;    // Pre-computed log(1-p0) per obs
+  double U_test;         // Score for test variable (d logL / d beta_test)
+  ZtnbFimResult hess;    // Hessian components (v_ee, v_et, v_tt_sum)
+  arma::vec mu_pos;      // Pre-computed mu per obs (for SPA cache)
+  arma::vec p0_pos;      // Pre-computed p0 per obs
+  arma::vec log_p1_pos;  // Pre-computed log(1-p0) per obs
 };
 
 ScoreAndHessianResult compute_score_and_hessian_nb(
@@ -766,8 +767,7 @@ ScoreAndHessianResult compute_score_and_hessian_nb(
     // ---- Score for test variable ----
     // grad_term = d(logL_ZTNB)/d(eta) = Y - mu*(Y+theta)/A - r*theta*mu/A
     // U_test = Σ w * grad_term * x_test (scalar dot, not full DGEMV)
-    double grad_term_i =
-        y - mu * (y + theta) / A - r * theta * mu_over_A;
+    double grad_term_i = y - mu * (y + theta) / A - r * theta * mu_over_A;
     U_test_acc += w_pos(i) * grad_term_i * X_pos(i, kx_null);
 
     // ---- Hessian: beta-beta weight (v_ee) ----
@@ -885,9 +885,8 @@ class CountGeomFunctor : public LikelihoodFunctor {
   CountGeomFunctor(arma::vec &y_pos, arma::mat &x_pos, arma::vec &offs_pos,
                    arma::vec &w_pos_in, PositiveOnlyTag tag)
       : LikelihoodFunctor(y_pos, x_pos, offs_pos, w_pos_in, tag),
-        negbin_functor(std::make_shared<CountNegBinFunctor>(y_pos, x_pos,
-                                                            offs_pos, w_pos_in,
-                                                            tag)) {}
+        negbin_functor(std::make_shared<CountNegBinFunctor>(
+            y_pos, x_pos, offs_pos, w_pos_in, tag)) {}
 
   double operator()(const arma::vec &parms) override {
     // Create a new parameter vector with an additional element for theta = 1
@@ -1819,9 +1818,8 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
   if (dist == "negbin") {
     // Fused score + observed Hessian: single pass, no functor needed
     bool need_spa = use_spa && n_test == 1;
-    auto fused = compute_score_and_hessian_nb(beta_full, theta_fim, X_pos,
-                                              off_pos, w_pos, Y_pos, kx_null,
-                                              need_spa);
+    auto fused = compute_score_and_hessian_nb(
+        beta_full, theta_fim, X_pos, off_pos, w_pos, Y_pos, kx_null, need_spa);
     U_test(0) = fused.U_test;
     fim = assemble_fim(fused.hess, X_pos);
     used_observed_info = true;
@@ -1839,8 +1837,7 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
                                       PositiveOnlyTag{});
       fim = compute_observed_info(obs_functor, parms_full);
     } else if (dist == "geometric") {
-      CountGeomFunctor functor(Y_pos, X_pos, off_pos, w_pos,
-                               PositiveOnlyTag{});
+      CountGeomFunctor functor(Y_pos, X_pos, off_pos, w_pos, PositiveOnlyTag{});
       functor.Gradient(parms_full, grad);
       CountGeomFunctor obs_functor(Y_pos, X_pos, off_pos, w_pos,
                                    PositiveOnlyTag{});
@@ -1937,21 +1934,19 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
     bool spa_solve_ok = arma::solve(proj_coef, I_nn_beta, I_nt_beta);
     arma::vec g_tilde_pos;
     if (spa_solve_ok) {
-      g_tilde_pos =
-          X_pos.col(kx_null) - X_pos.cols(0, kx_null - 1) * proj_coef;
+      g_tilde_pos = X_pos.col(kx_null) - X_pos.cols(0, kx_null - 1) * proj_coef;
     }
 
     // Build per-observation cache once, reused across all Newton iterations.
     // Phase 4: For NB, reuse pre-computed mu/p0/log_p1 from fused function.
     // Skip SPA if projection solve failed (singular beta FIM block).
     if (spa_solve_ok) {
-      auto cgf_cache =
-          (dist == "negbin" && fused_mu_pos.n_elem > 0)
-              ? build_cgf_cache_from_intermediates(
-                    theta_fim, fused_mu_pos, fused_p0_pos, fused_log_p1_pos,
-                    w_pos, g_tilde_pos)
-              : build_cgf_cache(beta_full, theta_fim, X_pos, off_pos, w_pos,
-                                g_tilde_pos);
+      auto cgf_cache = (dist == "negbin" && fused_mu_pos.n_elem > 0)
+                           ? build_cgf_cache_from_intermediates(
+                                 theta_fim, fused_mu_pos, fused_p0_pos,
+                                 fused_log_p1_pos, w_pos, g_tilde_pos)
+                           : build_cgf_cache(beta_full, theta_fim, X_pos,
+                                             off_pos, w_pos, g_tilde_pos);
 
       if (!cgf_cache.empty()) {
         double p_spa =
@@ -2014,8 +2009,7 @@ Rcpp::List score_test_count_cpp(const arma::vec &null_par, const arma::vec &Y,
       obj_after = opt.value();
       beta_refined = opt.par()(kx_null);
     } else {
-      CountGeomFunctor functor(Y_pos, X_pos, off_pos, w_pos,
-                               PositiveOnlyTag{});
+      CountGeomFunctor functor(Y_pos, X_pos, off_pos, w_pos, PositiveOnlyTag{});
       obj_before = functor(start_refine);
       arma::vec par = start_refine;
       Roptim<CountGeomFunctor> opt("BFGS");
