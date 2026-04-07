@@ -2332,3 +2332,291 @@ Rcpp::List compute_negbin_hurdle_fitted_cpp(
   return Rcpp::List::create(Rcpp::Named("fitted.values") = Yhat,
                             Rcpp::Named("residuals") = res);
 }
+
+// ==========================================================================
+// Cached score test: pre-compute null-only quantities ONCE, then run
+// per-peak tests with only O(n_pos) dot products + O(kx^2) Schur complement.
+// ==========================================================================
+
+// [[Rcpp::export]]
+Rcpp::List prepare_score_cache_nb_cpp(
+    const arma::vec &null_par, const arma::vec &Y,
+    const arma::mat &X_null, const arma::vec &offsetx,
+    const arma::vec &weights) {
+
+  int kx_null = X_null.n_cols;
+  double theta = std::exp(null_par(kx_null));
+  arma::vec beta_null = null_par.subvec(0, kx_null - 1);
+
+  // Pre-subset Y>0
+  arma::uvec Y1 = arma::find(Y > 0);
+  if (Y1.n_elem == 0) {
+    return Rcpp::List::create(Rcpp::Named("valid") = false);
+  }
+  arma::vec Y_pos = Y.elem(Y1);
+  arma::mat X_null_pos = X_null.rows(Y1);
+  arma::vec off_pos = offsetx.elem(Y1);
+  arma::vec w_pos = weights.elem(Y1);
+  int n_pos = Y1.n_elem;
+
+  // Compute eta and mu at null MLE
+  arma::vec eta_null = X_null_pos * beta_null + off_pos;
+  arma::vec mu_null = arma::exp(eta_null);
+
+  // Digamma/trigamma lookup table (depends only on theta)
+  double log_theta = std::log(theta);
+  int raw_max_y = static_cast<int>(Y_pos.max());
+  int tab_max = std::min(raw_max_y, 10000);
+  std::vector<double> digamma_tab(tab_max + 1, 0.0);
+  std::vector<double> trigamma_tab(tab_max + 1, 0.0);
+  for (int k = 1; k <= tab_max; k++) {
+    double tk = theta + static_cast<double>(k - 1);
+    digamma_tab[k] = digamma_tab[k - 1] + 1.0 / tk;
+    trigamma_tab[k] = trigamma_tab[k - 1] + 1.0 / (tk * tk);
+  }
+
+  // Single pass: compute all null-only quantities
+  arma::vec grad_weights(n_pos);  // w * grad_term (for U = dot(grad_weights, x_test_pos))
+  arma::vec v_ee(n_pos);          // Hessian beta-beta weight per obs
+  arma::vec v_et(n_pos);          // Hessian beta-theta weight per obs
+  double v_tt_sum = 0.0;
+  arma::vec mu_pos(n_pos), p0_pos(n_pos), log_p1_pos(n_pos);
+
+  for (int i = 0; i < n_pos; i++) {
+    double mu = mu_null(i);
+    double y = Y_pos(i);
+    double A = mu + theta;
+    double A2 = A * A;
+    double mu_over_A = mu / A;
+
+    double log_p0 = -theta * std::log1p(mu / theta);
+    double p0 = std::exp(log_p0);
+    double p1 = 1.0 - p0;
+    if (p1 < 1e-300) p1 = 1e-300;
+    double r = p0 / p1;
+
+    // SPA intermediates
+    mu_pos(i) = mu;
+    p0_pos(i) = p0;
+    log_p1_pos(i) =
+        (p0 > 0.5) ? std::log(-std::expm1(log_p0)) : std::log1p(-p0);
+
+    // Score weight: U_test = dot(grad_weights, x_test_pos)
+    double grad_term_i = y - mu * (y + theta) / A - r * theta * mu_over_A;
+    grad_weights(i) = w_pos(i) * grad_term_i;
+
+    // Hessian weights (identical to compute_score_and_hessian_nb)
+    double a_eta = -theta * mu_over_A;
+    double a_theta = -std::log1p(mu / theta) + mu_over_A;
+    double a_ee = -theta * theta * mu / A2;
+    double a_et = -mu * mu / A2;
+    double a_tt = mu * mu / (theta * A2);
+
+    double I_NB_ee = mu * theta * (y + theta) / A2;
+    double ZT_ee = -r * a_ee - r * (1.0 + r) * a_eta * a_eta;
+    v_ee(i) = w_pos(i) * (I_NB_ee + ZT_ee);
+
+    double I_NB_et = mu * (mu - y) / A2;
+    double ZT_et = -r * a_et - r * (1.0 + r) * a_eta * a_theta;
+    v_et(i) = w_pos(i) * theta * (I_NB_et + ZT_et);
+
+    // v_tt: needs digamma/trigamma
+    int yi = static_cast<int>(y);
+    double digamma_diff, trigamma_diff;
+    if (yi <= tab_max) {
+      digamma_diff = digamma_tab[yi];
+      trigamma_diff = trigamma_tab[yi];
+    } else {
+      digamma_diff = 0.0;
+      trigamma_diff = 0.0;
+      for (int k = 0; k < yi; k++) {
+        double tk = theta + static_cast<double>(k);
+        digamma_diff += 1.0 / tk;
+        trigamma_diff += 1.0 / (tk * tk);
+      }
+    }
+    double log_ratio = log_theta - std::log(A);
+    double b = digamma_diff + log_ratio + 1.0 - (y + theta) / A;
+    double c = -trigamma_diff + 1.0 / theta - 1.0 / A + (y - mu) / A2;
+    double I_ZT_tt = r * a_tt + r * (1.0 + r) * a_theta * a_theta;
+    double first_deriv_theta = b + r * a_theta;
+    double second_deriv_theta = c + I_ZT_tt;
+    v_tt_sum += w_pos(i) *
+                (-theta * first_deriv_theta - theta * theta * second_deriv_theta);
+  }
+
+  // Assemble null FIM block: I_nn = [X_null' diag(v_ee) X_null, X_null' v_et;
+  //                                   v_et' X_null,              v_tt_sum    ]
+  int np_null = kx_null + 1;  // null betas + theta
+  arma::mat I_nn(np_null, np_null, arma::fill::zeros);
+  arma::mat X_vee = X_null_pos.each_col() % v_ee;
+  I_nn.submat(0, 0, kx_null - 1, kx_null - 1) = X_null_pos.t() * X_vee;
+  arma::vec xt_vet = X_null_pos.t() * v_et;
+  I_nn.submat(0, kx_null, kx_null - 1, kx_null) = xt_vet;
+  I_nn.submat(kx_null, 0, kx_null, kx_null - 1) = xt_vet.t();
+  I_nn(kx_null, kx_null) = v_tt_sum;
+
+  // Pre-compute I_nn inverse for per-peak Schur complement.
+  // Matrix is small ((kx_null+1) x (kx_null+1), typically 3-6), so explicit
+  // inverse is fine and avoids per-peak triangular solve overhead.
+  arma::mat I_nn_inv;
+  bool inv_ok = arma::inv_sympd(I_nn_inv, I_nn);
+  if (!inv_ok) inv_ok = arma::inv(I_nn_inv, I_nn);
+  if (!inv_ok) {
+    return Rcpp::List::create(Rcpp::Named("valid") = false);
+  }
+
+  // Beta-only FIM block inverse for SPA projection (matches standard path's
+  // use of I_nn_beta, not the full I_nn including theta)
+  arma::mat I_nn_beta = I_nn.submat(0, 0, kx_null - 1, kx_null - 1);
+  arma::mat I_nn_beta_inv;
+  bool beta_inv_ok = arma::inv_sympd(I_nn_beta_inv, I_nn_beta);
+  if (!beta_inv_ok) beta_inv_ok = arma::inv(I_nn_beta_inv, I_nn_beta);
+  // SPA will be skipped if beta_inv failed (beta_inv_ok stored in cache)
+
+  // Cache X_null_pos weighted by v_ee for cross-FIM terms
+  arma::mat Xnull_vee_t = X_vee.t();  // kx_null x n_pos
+
+  return Rcpp::List::create(
+    Rcpp::Named("valid") = true,
+    Rcpp::Named("Y1") = Y1,
+    Rcpp::Named("Y_pos") = Y_pos,
+    Rcpp::Named("grad_weights") = grad_weights,
+    Rcpp::Named("v_ee") = v_ee,
+    Rcpp::Named("v_et") = v_et,
+    Rcpp::Named("I_nn_inv") = I_nn_inv,
+    Rcpp::Named("I_nn_beta_inv") = I_nn_beta_inv,
+    Rcpp::Named("beta_inv_ok") = beta_inv_ok,
+    Rcpp::Named("Xnull_vee_t") = Xnull_vee_t,
+    Rcpp::Named("X_null_pos") = X_null_pos,
+    Rcpp::Named("off_pos") = off_pos,
+    Rcpp::Named("w_pos") = w_pos,
+    Rcpp::Named("theta") = theta,
+    Rcpp::Named("beta_null") = beta_null,
+    Rcpp::Named("mu_pos") = mu_pos,
+    Rcpp::Named("p0_pos") = p0_pos,
+    Rcpp::Named("log_p1_pos") = log_p1_pos,
+    Rcpp::Named("kx_null") = kx_null);
+}
+
+// Per-peak cached score test: only test-variable-dependent work
+// [[Rcpp::export]]
+Rcpp::List score_test_count_cached_cpp(
+    const arma::vec &x_test,          // length n (full)
+    const arma::uvec &Y1,             // pos indices (0-based)
+    const arma::vec &grad_weights,    // n_pos
+    const arma::vec &v_ee,            // n_pos
+    const arma::vec &v_et,            // n_pos
+    const arma::vec &Y_pos,           // positive counts (for BFGS refinement)
+    const arma::mat &I_nn_inv,        // (kx_null+1) x (kx_null+1) inverse
+    const arma::mat &I_nn_beta_inv,   // beta-only FIM block inverse (for SPA)
+    bool beta_inv_ok,
+    const arma::mat &Xnull_vee_t,     // kx_null x n_pos
+    const arma::mat &X_null_pos,      // n_pos x kx_null
+    const arma::vec &off_pos,         // n_pos offsets (for BFGS refinement)
+    const arma::vec &w_pos,           // n_pos
+    double theta,
+    const arma::vec &beta_null,       // kx_null null betas (for BFGS refinement)
+    const arma::vec &mu_pos,          // n_pos (for SPA)
+    const arma::vec &p0_pos,          // n_pos (for SPA)
+    const arma::vec &log_p1_pos,      // n_pos (for SPA)
+    int kx_null,
+    bool use_spa = false, double spa_cutoff = 2.0) {
+
+  arma::vec x_pos = x_test.elem(Y1);
+
+  // 1. Score: single O(n_pos) dot product
+  double U_test = arma::dot(grad_weights, x_pos);
+
+  // 2. Cross-FIM terms
+  arma::vec I_nt_beta = Xnull_vee_t * x_pos;
+  double I_nt_theta = arma::dot(v_et, x_pos);
+  arma::vec I_nt(kx_null + 1);
+  I_nt.subvec(0, kx_null - 1) = I_nt_beta;
+  I_nt(kx_null) = I_nt_theta;
+  double I_tt = arma::dot(v_ee % x_pos, x_pos);
+
+  // 3. Schur complement: I_eff = I_tt - I_nt' * I_nn_inv * I_nt
+  double I_eff = I_tt - arma::dot(I_nt, I_nn_inv * I_nt);
+
+  if (I_eff <= 0 || !std::isfinite(I_eff)) {
+    return Rcpp::List::create(
+      Rcpp::Named("beta") = arma::vec(1, arma::fill::value(NA_REAL)),
+      Rcpp::Named("se") = arma::vec(1, arma::fill::value(NA_REAL)),
+      Rcpp::Named("statistic") = NA_REAL,
+      Rcpp::Named("pvalue") = NA_REAL,
+      Rcpp::Named("spa_applied") = false);
+  }
+
+  double T_stat = U_test * U_test / I_eff;
+  double beta_hat = U_test / I_eff;
+  double se_hat = 1.0 / std::sqrt(I_eff);
+  double pvalue = R::pchisq(T_stat, 1.0, 0, 0);
+
+  // SPA: use beta-only FIM block for projection (matches standard path)
+  bool spa_applied = false;
+  if (use_spa && std::sqrt(T_stat) > spa_cutoff && beta_inv_ok) {
+    arma::vec proj_coef = I_nn_beta_inv * I_nt_beta;
+    arma::vec g_tilde_pos = x_pos - X_null_pos * proj_coef;
+    auto cgf_cache = build_cgf_cache_from_intermediates(
+        theta, mu_pos, p0_pos, log_p1_pos, w_pos, g_tilde_pos);
+    if (!cgf_cache.empty()) {
+      double p_spa = spa_pvalue_twosided(U_test, pvalue, theta, cgf_cache);
+      if (p_spa >= 0 && p_spa <= 1.0) {
+        pvalue = p_spa;
+        spa_applied = true;
+      }
+    }
+  }
+
+  // Beta refinement (matches standard path OPT-5):
+  // When SPA enabled, use spa_cutoff; otherwise default to 2.0
+  double refine_cutoff = use_spa ? spa_cutoff : 2.0;
+  if (std::sqrt(T_stat) > refine_cutoff) {
+    int kx_full = kx_null + 1;
+    arma::mat X_pos_full(Y1.n_elem, kx_full);
+    X_pos_full.cols(0, kx_null - 1) = X_null_pos;
+    X_pos_full.col(kx_null) = x_pos;
+    arma::vec par_start(kx_full + 1);
+    par_start.subvec(0, kx_null - 1) = beta_null;
+    par_start(kx_null) = beta_hat;
+    par_start(kx_full) = std::log(theta);
+    // PositiveOnlyTag constructor takes non-const refs for zero-copy aliasing
+    arma::vec Y_pos_m = Y_pos;
+    arma::vec off_pos_m = off_pos;
+    arma::vec w_pos_m = w_pos;
+    CountNegBinFunctor ref_functor(Y_pos_m, X_pos_full, off_pos_m, w_pos_m,
+                                    PositiveOnlyTag{});
+    double obj_score = ref_functor(par_start);
+    Roptim<CountNegBinFunctor> opt("BFGS");
+    opt.control.trace = 0;
+    opt.control.maxit = 5;
+    opt.minimize(ref_functor, par_start);
+    if (opt.convergence() >= 0 && ref_functor(opt.par()) <= obj_score) {
+      beta_hat = opt.par()(kx_null);
+    }
+  }
+
+  // Back-compute SE from p-value (matches standard path exactly)
+  if (pvalue <= 0.0) {
+    se_hat = 0.0;
+  } else if (pvalue >= 1.0) {
+    se_hat = R_PosInf;
+  } else {
+    double z_val = R::qnorm(pvalue / 2.0, 0.0, 1.0, 1, 0);
+    if (std::isfinite(z_val) && z_val != 0.0 && beta_hat != 0.0) {
+      se_hat = std::abs(beta_hat / z_val);
+    }
+  }
+
+  arma::vec beta_vec(1);
+  beta_vec(0) = beta_hat;
+  arma::vec se_vec(1);
+  se_vec(0) = se_hat;
+  return Rcpp::List::create(
+    Rcpp::Named("beta") = beta_vec,
+    Rcpp::Named("se") = se_vec,
+    Rcpp::Named("statistic") = T_stat,
+    Rcpp::Named("pvalue") = pvalue,
+    Rcpp::Named("spa_applied") = spa_applied);
+}

@@ -49,3 +49,11 @@ compute_negbin_hurdle_fitted_cpp <- function(coefc, coefz, X, Z, offsetx, offset
     .Call(`_fasthurdle_compute_negbin_hurdle_fitted_cpp`, coefc, coefz, X, Z, offsetx, offsetz, theta, y)
 }
 
+prepare_score_cache_nb_cpp <- function(null_par, Y, X_null, offsetx, weights) {
+    .Call(`_fasthurdle_prepare_score_cache_nb_cpp`, null_par, Y, X_null, offsetx, weights)
+}
+
+score_test_count_cached_cpp <- function(x_test, Y1, grad_weights, v_ee, v_et, Y_pos, I_nn_inv, I_nn_beta_inv, beta_inv_ok, Xnull_vee_t, X_null_pos, off_pos, w_pos, theta, beta_null, mu_pos, p0_pos, log_p1_pos, kx_null, use_spa = FALSE, spa_cutoff = 2.0) {
+    .Call(`_fasthurdle_score_test_count_cached_cpp`, x_test, Y1, grad_weights, v_ee, v_et, Y_pos, I_nn_inv, I_nn_beta_inv, beta_inv_ok, Xnull_vee_t, X_null_pos, off_pos, w_pos, theta, beta_null, mu_pos, p0_pos, log_p1_pos, kx_null, use_spa, spa_cutoff)
+}
+

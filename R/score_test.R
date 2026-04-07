@@ -267,16 +267,12 @@ score_test_count <- function(X_null, x_test, y, offsetx = NULL, weights = NULL,
   if (is.null(offsetx)) offsetx <- rep.int(0, n)
   if (is.null(weights)) weights <- rep.int(1, n)
 
-  # Ensure x_test is a single-column matrix
-  if (is.vector(x_test)) x_test <- matrix(x_test, ncol = 1)
-  if (ncol(x_test) != 1) {
-    stop("score_test_count currently supports only a single test variable")
-  }
-
-  # Build full model matrix
-  X_full <- cbind(X_null, x_test)
-  if (is.null(colnames(X_full))) {
-    colnames(X_full) <- paste0("V", seq_len(ncol(X_full)))
+  # Ensure x_test is a single test variable
+  if (is.matrix(x_test) || is.data.frame(x_test)) {
+    if (ncol(x_test) != 1) {
+      stop("score_test_count currently supports only a single test variable")
+    }
+    x_test <- as.numeric(x_test)
   }
 
   # Fit or reuse null model
@@ -287,10 +283,12 @@ score_test_count <- function(X_null, x_test, y, offsetx = NULL, weights = NULL,
     )
   } else {
     if (null_fit_count$dist != dist) {
-      stop("null_fit_count distribution (", null_fit_count$dist, ") does not match dist (", dist, ")")
+      stop("null_fit_count distribution (", null_fit_count$dist,
+           ") does not match dist (", dist, ")")
     }
     if (null_fit_count$kx_null != ncol(X_null)) {
-      stop("null_fit_count has ", null_fit_count$kx_null, " covariates but X_null has ", ncol(X_null))
+      stop("null_fit_count has ", null_fit_count$kx_null,
+           " covariates but X_null has ", ncol(X_null))
     }
   }
 
@@ -298,14 +296,73 @@ score_test_count <- function(X_null, x_test, y, offsetx = NULL, weights = NULL,
   use_spa <- !is.null(spa_cutoff) && is.finite(spa_cutoff)
   spa_cutoff_val <- if (use_spa) spa_cutoff else 1e30
 
-  # Compute score test via C++
+  # Fast path: use cached null quantities if available (negbin only)
+  # Validate cache matches current data via fingerprint
+  sc <- null_fit_count$score_cache
+  cache_valid <- !is.null(sc) && isTRUE(sc$valid) &&
+    length(y) == sc$n && sum(y * seq_along(y)) == sc$y_hash
+  if (cache_valid) {
+    result <- score_test_count_cached_cpp(
+      x_test = x_test, Y1 = sc$Y1, Y_pos = sc$Y_pos,
+      grad_weights = sc$grad_weights, v_ee = sc$v_ee, v_et = sc$v_et,
+      I_nn_inv = sc$I_nn_inv, I_nn_beta_inv = sc$I_nn_beta_inv,
+      beta_inv_ok = sc$beta_inv_ok,
+      Xnull_vee_t = sc$Xnull_vee_t, X_null_pos = sc$X_null_pos,
+      off_pos = sc$off_pos, w_pos = sc$w_pos,
+      theta = sc$theta, beta_null = sc$beta_null,
+      mu_pos = sc$mu_pos, p0_pos = sc$p0_pos, log_p1_pos = sc$log_p1_pos,
+      kx_null = sc$kx_null, use_spa = use_spa, spa_cutoff = spa_cutoff_val
+    )
+    result$null_par <- null_fit_count$par
+    result$null_convergence <- null_fit_count$convergence
+    return(result)
+  }
+
+  # Standard path (Poisson/Geom, or no cache)
+  if (is.vector(x_test)) x_test <- matrix(x_test, ncol = 1)
+  X_full <- cbind(X_null, x_test)
+  if (is.null(colnames(X_full))) {
+    colnames(X_full) <- paste0("V", seq_len(ncol(X_full)))
+  }
   result <- score_test_count_cpp(
     null_par = null_fit_count$par, Y = y, X_null = X_null, X_full = X_full,
     offsetx = offsetx, weights = weights, dist = dist,
     use_spa = use_spa, spa_cutoff = spa_cutoff_val
   )
-
   result$null_par <- null_fit_count$par
   result$null_convergence <- null_fit_count$convergence
   result
+}
+
+#' Prepare cached quantities for fast per-peak score tests
+#'
+#' Pre-computes null-only Hessian weights, FIM inverse, and SPA intermediates.
+#' When stored in the null_fit_count object, subsequent score_test_count calls
+#' use a fast path that avoids redundant O(n_pos) computation per peak.
+#'
+#' @param null_fit_count Fitted null model from fit_null_count (dist="negbin").
+#' @param y Response vector.
+#' @param X_null Null model matrix.
+#' @param offsetx Offset vector.
+#' @param weights Weight vector.
+#' @return The null_fit_count object with an attached score_cache element.
+#' @export
+prepare_score_cache <- function(null_fit_count, y, X_null, offsetx = NULL,
+                                weights = NULL) {
+  n <- length(y)
+  if (is.null(offsetx)) offsetx <- rep.int(0, n)
+  if (is.null(weights)) weights <- rep.int(1, n)
+  if (null_fit_count$dist != "negbin") {
+    return(null_fit_count)  # caching only implemented for negbin
+  }
+  cache <- prepare_score_cache_nb_cpp(
+    null_fit_count$par, y, X_null, offsetx, weights
+  )
+  if (isTRUE(cache$valid)) {
+    # Store fingerprint for stale-cache detection
+    cache$n <- length(y)
+    cache$y_hash <- sum(y * seq_along(y))  # fast fingerprint
+    null_fit_count$score_cache <- cache
+  }
+  null_fit_count
 }

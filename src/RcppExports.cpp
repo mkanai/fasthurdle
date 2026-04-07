@@ -239,6 +239,52 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// prepare_score_cache_nb_cpp
+Rcpp::List prepare_score_cache_nb_cpp(const arma::vec& null_par, const arma::vec& Y, const arma::mat& X_null, const arma::vec& offsetx, const arma::vec& weights);
+RcppExport SEXP _fasthurdle_prepare_score_cache_nb_cpp(SEXP null_parSEXP, SEXP YSEXP, SEXP X_nullSEXP, SEXP offsetxSEXP, SEXP weightsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::vec& >::type null_par(null_parSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type Y(YSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type X_null(X_nullSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type offsetx(offsetxSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type weights(weightsSEXP);
+    rcpp_result_gen = Rcpp::wrap(prepare_score_cache_nb_cpp(null_par, Y, X_null, offsetx, weights));
+    return rcpp_result_gen;
+END_RCPP
+}
+// score_test_count_cached_cpp
+Rcpp::List score_test_count_cached_cpp(const arma::vec& x_test, const arma::uvec& Y1, const arma::vec& grad_weights, const arma::vec& v_ee, const arma::vec& v_et, const arma::vec& Y_pos, const arma::mat& I_nn_inv, const arma::mat& I_nn_beta_inv, bool beta_inv_ok, const arma::mat& Xnull_vee_t, const arma::mat& X_null_pos, const arma::vec& off_pos, const arma::vec& w_pos, double theta, const arma::vec& beta_null, const arma::vec& mu_pos, const arma::vec& p0_pos, const arma::vec& log_p1_pos, int kx_null, bool use_spa, double spa_cutoff);
+RcppExport SEXP _fasthurdle_score_test_count_cached_cpp(SEXP x_testSEXP, SEXP Y1SEXP, SEXP grad_weightsSEXP, SEXP v_eeSEXP, SEXP v_etSEXP, SEXP Y_posSEXP, SEXP I_nn_invSEXP, SEXP I_nn_beta_invSEXP, SEXP beta_inv_okSEXP, SEXP Xnull_vee_tSEXP, SEXP X_null_posSEXP, SEXP off_posSEXP, SEXP w_posSEXP, SEXP thetaSEXP, SEXP beta_nullSEXP, SEXP mu_posSEXP, SEXP p0_posSEXP, SEXP log_p1_posSEXP, SEXP kx_nullSEXP, SEXP use_spaSEXP, SEXP spa_cutoffSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::vec& >::type x_test(x_testSEXP);
+    Rcpp::traits::input_parameter< const arma::uvec& >::type Y1(Y1SEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type grad_weights(grad_weightsSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type v_ee(v_eeSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type v_et(v_etSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type Y_pos(Y_posSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type I_nn_inv(I_nn_invSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type I_nn_beta_inv(I_nn_beta_invSEXP);
+    Rcpp::traits::input_parameter< bool >::type beta_inv_ok(beta_inv_okSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type Xnull_vee_t(Xnull_vee_tSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type X_null_pos(X_null_posSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type off_pos(off_posSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type w_pos(w_posSEXP);
+    Rcpp::traits::input_parameter< double >::type theta(thetaSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type beta_null(beta_nullSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type mu_pos(mu_posSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type p0_pos(p0_posSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type log_p1_pos(log_p1_posSEXP);
+    Rcpp::traits::input_parameter< int >::type kx_null(kx_nullSEXP);
+    Rcpp::traits::input_parameter< bool >::type use_spa(use_spaSEXP);
+    Rcpp::traits::input_parameter< double >::type spa_cutoff(spa_cutoffSEXP);
+    rcpp_result_gen = Rcpp::wrap(score_test_count_cached_cpp(x_test, Y1, grad_weights, v_ee, v_et, Y_pos, I_nn_inv, I_nn_beta_inv, beta_inv_ok, Xnull_vee_t, X_null_pos, off_pos, w_pos, theta, beta_null, mu_pos, p0_pos, log_p1_pos, kx_null, use_spa, spa_cutoff));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_fasthurdle_compute_ztnb_fisher_info_cpp", (DL_FUNC) &_fasthurdle_compute_ztnb_fisher_info_cpp, 5},
@@ -253,6 +299,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fasthurdle_score_test_count_cpp", (DL_FUNC) &_fasthurdle_score_test_count_cpp, 9},
     {"_fasthurdle_score_test_zero_cpp", (DL_FUNC) &_fasthurdle_score_test_zero_cpp, 8},
     {"_fasthurdle_compute_negbin_hurdle_fitted_cpp", (DL_FUNC) &_fasthurdle_compute_negbin_hurdle_fitted_cpp, 8},
+    {"_fasthurdle_prepare_score_cache_nb_cpp", (DL_FUNC) &_fasthurdle_prepare_score_cache_nb_cpp, 5},
+    {"_fasthurdle_score_test_count_cached_cpp", (DL_FUNC) &_fasthurdle_score_test_count_cached_cpp, 21},
     {NULL, NULL, 0}
 };
 
