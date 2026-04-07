@@ -20,7 +20,6 @@ LinkingTo:
 Suggests:
   car,
   pscl,
-  qvalue,
   testthat (>= 3.0.0),
   microbenchmark
 Config/testthat/edition: 3

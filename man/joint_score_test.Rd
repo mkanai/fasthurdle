@@ -5,31 +5,37 @@
 \title{Joint 2-df score test with stage-wise mode classification}
 \usage{
 joint_score_test(
-  chisq_zero,
-  chisq_count,
-  alpha = 0.05,
-  pi0.method = c("smoother", "bootstrap")
+  p_zero = NULL,
+  p_count = NULL,
+  chisq_zero = NULL,
+  chisq_count = NULL,
+  alpha = 0.05
 )
 }
 \arguments{
+\item{p_zero}{Numeric vector of zero-model p-values (default positional
+input). Converted internally to chi-squared(1) statistics via
+\code{qchisq(p, df = 1, lower.tail = FALSE)}.}
+
+\item{p_count}{Numeric vector of count-model p-values.}
+
 \item{chisq_zero}{Numeric vector of zero-model chi-squared statistics (1 df).
-From \code{score_test_zero()$statistic} or \code{summary()$coefficients$zero[,"z value"]^2}.}
+From \code{score_test_zero()$statistic} or
+\code{summary()$coefficients$zero[,"z value"]^2}.
+If provided, \code{p_zero}/\code{p_count} must be \code{NULL}.}
 
 \item{chisq_count}{Numeric vector of count-model chi-squared statistics (1 df).
-From \code{score_test_count()$statistic} or \code{summary()$coefficients$count[,"z value"]^2}.}
+From \code{score_test_count()$statistic} or
+\code{summary()$coefficients$count[,"z value"]^2}.}
 
 \item{alpha}{Significance threshold for both screening and confirmation
 (default: 0.05).}
-
-\item{pi0.method}{Method for estimating the proportion of true nulls in
-\code{\link[qvalue]{qvalue}}. Either \code{"smoother"} (default) or
-\code{"bootstrap"}.}
 }
 \value{
 A data.frame with columns:
   \item{chisq_joint}{Joint chi-squared(2) statistic (T_zero + T_count).}
   \item{p_joint}{Joint p-value from chi-squared(2) distribution.}
-  \item{q_joint}{qvalue-based FDR for the joint test.}
+  \item{q_joint}{Benjamini-Hochberg adjusted p-value for the joint test.}
   \item{selected}{Logical; TRUE if q_joint < alpha.}
   \item{p_adj_zero}{Holm-adjusted zero-model p-value (NA if not selected).}
   \item{p_adj_count}{Holm-adjusted count-model p-value (NA if not selected).}
@@ -44,12 +50,11 @@ Combines zero and count model score test statistics via a joint chi-squared(2)
 test for omnibus screening, then applies Holm step-down for mode classification.
 Under the factorized hurdle likelihood, the zero and count score statistics are
 independent, so the joint statistic is simply their sum: T_joint = T_zero + T_count.
-This is more principled than ACAT (Cauchy combination) which uses an ad-hoc
-heavy-tailed combination.
 }
 \details{
-Takes chi-squared statistics directly (not p-values) to avoid underflow at
-large sample sizes where p-values can be numerically zero.
+By default accepts p-values (positional arguments). Chi-squared statistics
+can be supplied instead via \code{chisq_zero}/\code{chisq_count}; this avoids
+numerical underflow for very small p-values.
 }
 \references{
 Van den Berge, K., et al. (2017). stageR: a general stage-wise method for
