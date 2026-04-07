@@ -70,6 +70,7 @@ fit_null_count <- function(X_null, y, offsetx = NULL, weights = NULL,
       par = null_fit$par,
       value = null_fit$value,
       convergence = null_fit$convergence,
+      converged = null_fit$convergence == 0,
       dist = dist,
       kx_null = ncol(X_null)
     ),
@@ -129,11 +130,39 @@ fit_null_zero <- function(Z_null, y, offsetz = NULL, weights = NULL,
       par = null_fit$par,
       value = null_fit$value,
       convergence = null_fit$convergence,
+      converged = null_fit$convergence == 0,
       kz_null = ncol(Z_null),
       link = "logit"
     ),
     class = "fasthurdle_null_zero"
   )
+}
+
+#' Prepare cached quantities for fast per-peak zero score tests
+#'
+#' Pre-computes null FIM inverse, score weights, and SPA intermediates for
+#' the zero (binomial/logistic) component. Analogous to
+#' \code{\link{prepare_score_cache_count}} for the count component.
+#'
+#' @param null_fit_zero Fitted null model from \code{\link{fit_null_zero}}.
+#' @param y Response vector.
+#' @param Z_null Null zero model matrix.
+#' @param offsetz Offset vector.
+#' @param weights Weight vector.
+#' @return The null_fit_zero object with an attached score_cache element.
+#' @export
+prepare_score_cache_zero <- function(null_fit_zero, y, Z_null, offsetz = NULL,
+                                     weights = NULL) {
+  n <- length(y)
+  if (is.null(offsetz)) offsetz <- rep.int(0, n)
+  if (is.null(weights)) weights <- rep.int(1, n)
+  cache <- prepare_score_cache_zero_cpp(
+    null_fit_zero$par, y, Z_null, offsetz, weights
+  )
+  if (isTRUE(cache$valid)) {
+    null_fit_zero$score_cache <- cache
+  }
+  null_fit_zero
 }
 
 #' Score Test for Zero (Binomial/Logit) Component
@@ -162,10 +191,6 @@ score_test_zero <- function(Z_null, z_test, y, offsetz = NULL, weights = NULL,
   if (is.vector(z_test)) z_test <- matrix(z_test, ncol = 1)
   if (ncol(z_test) != 1) {
     stop("score_test_zero currently supports only a single test variable")
-  }
-  Z_full <- cbind(Z_null, z_test)
-  if (is.null(colnames(Z_full))) {
-    colnames(Z_full) <- paste0("V", seq_len(ncol(Z_full)))
   }
 
   # Fit or reuse null model
@@ -198,65 +223,88 @@ score_test_zero <- function(Z_null, z_test, y, offsetz = NULL, weights = NULL,
   use_spa <- !is.null(spa_cutoff) && is.finite(spa_cutoff)
   spa_cutoff_val <- if (use_spa) spa_cutoff else 1e30
 
-  result <- score_test_zero_cpp(
-    null_par = null_fit_zero$par, Y = y, Z_null = Z_null, Z_full = Z_full,
-    offsetz = offsetz, weights = weights,
-    use_spa = use_spa, spa_cutoff = spa_cutoff_val
-  )
+  # Prepare cache if not present
+  if (is.null(null_fit_zero$score_cache) ||
+    !isTRUE(null_fit_zero$score_cache$valid)) {
+    null_fit_zero <- prepare_score_cache_zero(
+      null_fit_zero, y, Z_null,
+      offsetz = offsetz, weights = weights
+    )
+  }
+  sc <- null_fit_zero$score_cache
 
+  if (is.null(sc) || !isTRUE(sc$valid)) {
+    warning("Zero score cache invalid (null FIM singular; complete separation?); returning NA")
+    return(list(
+      beta = NA_real_, se = NA_real_, statistic = NA_real_,
+      pvalue = NA_real_, spa_applied = FALSE,
+      null_par = null_fit_zero$par, null_convergence = null_fit_zero$convergence
+    ))
+  }
+
+  z_vec <- as.numeric(z_test)
+  result <- score_test_zero_cpp(
+    z_vec, sc$W_resid, sc$W_diag, sc$I_nn_inv, sc$Znull_W_t,
+    sc$p_null, y, Z_null, offsetz, weights, null_fit_zero$par, sc$kz_null,
+    use_spa, spa_cutoff_val
+  )
   result$null_par <- null_fit_zero$par
   result$null_convergence <- null_fit_zero$convergence
   result
 }
 
 
-#' Score Test for Count Component of Hurdle Model
+#' Prepare cached quantities for fast per-peak count score tests
 #'
-#' @description
-#' Computes the score test for a single predictor in the count component
-#' of a hurdle model. The score test evaluates the score statistic at the null
-#' MLE using the observed information (negative Hessian) instead of the expected
-#' Fisher information, making it robust to model misspecification.
+#' Pre-computes null-only Hessian weights, FIM inverse, and SPA intermediates.
+#' When stored in the null_fit_count object, subsequent score_test_count calls
+#' use the cached quantities to avoid redundant O(n_pos) computation per peak.
+#' Supports all count distributions (negbin, poisson, geometric) via ZTNB
+#' formulas with appropriate theta parameterization.
 #'
-#' @param X_null Model matrix for the null model (intercept + covariates).
-#' @param x_test Test variable vector or single-column matrix.
-#' @param y Response vector of counts.
-#' @param offsetx Optional offset vector. Default is NULL (no offset).
-#' @param weights Optional weight vector. Default is NULL (unit weights).
-#' @param dist Count distribution: "negbin", "poisson", or "geometric".
-#' @param null_fit_count Optional. A pre-fitted null model from \code{\link{fit_null_count}}.
-#'   If provided, the null model is not re-fitted, saving computation time.
-#' @param spa_cutoff Numeric or NULL. Apply saddlepoint approximation (SPA) for
-#'   p-values when |z| exceeds this cutoff. Default is \code{NULL} (disabled).
-#'   Set to \code{2} to enable SPA for improved tail accuracy at small sample sizes.
-#' @param method Optimization method for fitting the null model (ignored if null_fit_count
-#'   is provided). Default is "BFGS".
-#' @param maxit Maximum iterations for the null model (ignored if null_fit_count is provided).
-#'   Default is 10000.
+#' @param null_fit_count Fitted null model from \code{\link{fit_null_count}}.
+#' @param y Response vector.
+#' @param X_null Null model matrix.
+#' @param offsetx Offset vector.
+#' @param weights Weight vector.
+#' @return The null_fit_count object with an attached score_cache element.
+#' @export
+prepare_score_cache_count <- function(null_fit_count, y, X_null, offsetx = NULL,
+                                      weights = NULL) {
+  n <- length(y)
+  if (is.null(offsetx)) offsetx <- rep.int(0, n)
+  if (is.null(weights)) weights <- rep.int(1, n)
+  cache <- prepare_score_cache_count_cpp(
+    null_fit_count$par, y, X_null, offsetx, weights,
+    dist = null_fit_count$dist
+  )
+  if (isTRUE(cache$valid)) {
+    null_fit_count$score_cache <- cache
+  }
+  null_fit_count
+}
+
+#' Score test for the count component of a hurdle model
 #'
-#' @return A list with components:
-#'   \item{beta}{Effect size estimate. For significant tests (|z| > \code{spa_cutoff},
-#'     or |z| > 2 when SPA is disabled), refined via 5-iteration BFGS from the score
-#'     estimate (within ~3\% of full MLE). For non-significant tests, uses the ratio
-#'     estimator (approximate).}
-#'   \item{se}{Standard error, back-computed from the p-value for consistency.}
-#'   \item{statistic}{The score test statistic (chi-squared, using observed information).}
-#'   \item{pvalue}{The p-value. SPA-adjusted when |z| > \code{spa_cutoff}.}
-#'   \item{spa_applied}{Logical. Whether SPA was applied.}
-#'   \item{null_par}{The null model MLE parameters.}
-#'   \item{null_convergence}{Convergence status of the null model.}
+#' Tests whether a single test variable has a significant effect on the count
+#' component, using a score test with observed information. Uses pre-cached
+#' null quantities for O(n_pos) per-peak computation. Supports all count
+#' distributions (negbin, poisson, geometric).
 #'
-#' @examples
-#' \dontrun{
-#' # One-shot usage
-#' result <- score_test_count(X_null, x_test, y, dist = "negbin")
-#'
-#' # With cached null model (for testing many x_test variables)
-#' null_fit_count <- fit_null_count(X_null, y, dist = "negbin")
-#' result1 <- score_test_count(X_null, x_test1, y, null_fit_count = null_fit_count)
-#' result2 <- score_test_count(X_null, x_test2, y, null_fit_count = null_fit_count)
-#' }
-#'
+#' @param X_null Null model matrix (n x kx_null).
+#' @param x_test Test variable vector (length n).
+#' @param y Response vector.
+#' @param offsetx Offset vector (default: zeros).
+#' @param weights Weight vector (default: ones).
+#' @param dist Count distribution: \code{"negbin"}, \code{"poisson"}, or
+#'   \code{"geometric"}.
+#' @param null_fit_count Fitted null model from \code{\link{fit_null_count}}.
+#'   If NULL, fitted internally.
+#' @param spa_cutoff Saddlepoint approximation cutoff. NULL or Inf disables SPA.
+#' @param method Optimization method for null model fitting (default: "BFGS").
+#' @param maxit Maximum iterations for null model fitting.
+#' @return A list with components \code{beta}, \code{se}, \code{statistic},
+#'   \code{pvalue}, \code{spa_applied}, \code{null_par}, \code{null_convergence}.
 #' @export
 score_test_count <- function(X_null, x_test, y, offsetx = NULL, weights = NULL,
                              dist = c("negbin", "poisson", "geometric"),
@@ -283,86 +331,104 @@ score_test_count <- function(X_null, x_test, y, offsetx = NULL, weights = NULL,
     )
   } else {
     if (null_fit_count$dist != dist) {
-      stop("null_fit_count distribution (", null_fit_count$dist,
-           ") does not match dist (", dist, ")")
+      stop(
+        "null_fit_count distribution (", null_fit_count$dist,
+        ") does not match dist (", dist, ")"
+      )
     }
     if (null_fit_count$kx_null != ncol(X_null)) {
-      stop("null_fit_count has ", null_fit_count$kx_null,
-           " covariates but X_null has ", ncol(X_null))
+      stop(
+        "null_fit_count has ", null_fit_count$kx_null,
+        " covariates but X_null has ", ncol(X_null)
+      )
     }
+  }
+
+  # Prepare cache if not already present (works for all distributions)
+  if (is.null(null_fit_count$score_cache) ||
+    !isTRUE(null_fit_count$score_cache$valid)) {
+    null_fit_count <- prepare_score_cache_count(null_fit_count, y, X_null,
+      offsetx = offsetx, weights = weights
+    )
+  }
+  sc <- null_fit_count$score_cache
+  if (is.null(sc) || !isTRUE(sc$valid)) {
+    warning("Count score cache invalid (null FIM singular?); returning NA")
+    return(list(
+      beta = NA_real_, se = NA_real_, statistic = NA_real_,
+      pvalue = NA_real_, spa_applied = FALSE,
+      null_par = null_fit_count$par, null_convergence = null_fit_count$convergence
+    ))
   }
 
   # Resolve SPA: NULL or Inf disables, numeric enables with that cutoff
   use_spa <- !is.null(spa_cutoff) && is.finite(spa_cutoff)
   spa_cutoff_val <- if (use_spa) spa_cutoff else 1e30
 
-  # Fast path: use cached null quantities if available (negbin only)
-  # Validate cache matches current data via fingerprint
-  sc <- null_fit_count$score_cache
-  cache_valid <- !is.null(sc) && isTRUE(sc$valid) &&
-    length(y) == sc$n && sum(y * seq_along(y)) == sc$y_hash
-  if (cache_valid) {
-    result <- score_test_count_cached_cpp(
-      x_test = x_test, Y1 = sc$Y1, Y_pos = sc$Y_pos,
-      grad_weights = sc$grad_weights, v_ee = sc$v_ee, v_et = sc$v_et,
-      I_nn_inv = sc$I_nn_inv, I_nn_beta_inv = sc$I_nn_beta_inv,
-      beta_inv_ok = sc$beta_inv_ok,
-      Xnull_vee_t = sc$Xnull_vee_t, X_null_pos = sc$X_null_pos,
-      off_pos = sc$off_pos, w_pos = sc$w_pos,
-      theta = sc$theta, beta_null = sc$beta_null,
-      mu_pos = sc$mu_pos, p0_pos = sc$p0_pos, log_p1_pos = sc$log_p1_pos,
-      kx_null = sc$kx_null, use_spa = use_spa, spa_cutoff = spa_cutoff_val
-    )
-    result$null_par <- null_fit_count$par
-    result$null_convergence <- null_fit_count$convergence
-    return(result)
-  }
-
-  # Standard path (Poisson/Geom, or no cache)
-  if (is.vector(x_test)) x_test <- matrix(x_test, ncol = 1)
-  X_full <- cbind(X_null, x_test)
-  if (is.null(colnames(X_full))) {
-    colnames(X_full) <- paste0("V", seq_len(ncol(X_full)))
-  }
+  # Unified cached path for all distributions
+  has_theta <- isTRUE(sc$has_theta)
   result <- score_test_count_cpp(
-    null_par = null_fit_count$par, Y = y, X_null = X_null, X_full = X_full,
-    offsetx = offsetx, weights = weights, dist = dist,
-    use_spa = use_spa, spa_cutoff = spa_cutoff_val
+    x_test = x_test, Y1 = sc$Y1,
+    grad_weights = sc$grad_weights, v_ee = sc$v_ee,
+    Y_pos = sc$Y_pos,
+    I_nn_inv = sc$I_nn_inv, I_nn_beta_inv = sc$I_nn_beta_inv,
+    beta_inv_ok = sc$beta_inv_ok,
+    Xnull_vee_t = sc$Xnull_vee_t, X_null_pos = sc$X_null_pos,
+    w_pos = sc$w_pos, theta = sc$theta,
+    beta_null = sc$beta_null, eta_null_pos = sc$eta_null_pos,
+    mu_pos = sc$mu_pos, p0_pos = sc$p0_pos, log_p1_pos = sc$log_p1_pos,
+    kx_null = sc$kx_null, has_theta = has_theta,
+    use_spa = use_spa, spa_cutoff = spa_cutoff_val,
+    v_et_nullable = if (has_theta) sc$v_et else NULL
   )
   result$null_par <- null_fit_count$par
   result$null_convergence <- null_fit_count$convergence
   result
 }
 
-#' Prepare cached quantities for fast per-peak score tests
-#'
-#' Pre-computes null-only Hessian weights, FIM inverse, and SPA intermediates.
-#' When stored in the null_fit_count object, subsequent score_test_count calls
-#' use a fast path that avoids redundant O(n_pos) computation per peak.
-#'
-#' @param null_fit_count Fitted null model from fit_null_count (dist="negbin").
-#' @param y Response vector.
-#' @param X_null Null model matrix.
-#' @param offsetx Offset vector.
-#' @param weights Weight vector.
-#' @return The null_fit_count object with an attached score_cache element.
-#' @export
-prepare_score_cache <- function(null_fit_count, y, X_null, offsetx = NULL,
-                                weights = NULL) {
+# ============================================================================
+# Internal helpers: ensure null models are fitted and cached
+# ============================================================================
+
+# Ensure count null is fitted with score cache.
+# Returns a ready-to-use null fit object.
+ensure_null_count <- function(null_fit_count, X_null, y,
+                              offsetx = NULL, weights = NULL,
+                              dist = "negbin") {
   n <- length(y)
   if (is.null(offsetx)) offsetx <- rep.int(0, n)
   if (is.null(weights)) weights <- rep.int(1, n)
-  if (null_fit_count$dist != "negbin") {
-    return(null_fit_count)  # caching only implemented for negbin
+
+  if (is.null(null_fit_count) ||
+    !inherits(null_fit_count, "fasthurdle_null")) {
+    null_fit_count <- fit_null_count(
+      X_null, y,
+      offsetx = offsetx, weights = weights,
+      dist = dist
+    )
   }
-  cache <- prepare_score_cache_nb_cpp(
-    null_fit_count$par, y, X_null, offsetx, weights
-  )
-  if (isTRUE(cache$valid)) {
-    # Store fingerprint for stale-cache detection
-    cache$n <- length(y)
-    cache$y_hash <- sum(y * seq_along(y))  # fast fingerprint
-    null_fit_count$score_cache <- cache
+  if (is.null(null_fit_count$score_cache)) {
+    null_fit_count <- prepare_score_cache_count(
+      null_fit_count, y, X_null,
+      offsetx = offsetx, weights = weights
+    )
   }
   null_fit_count
+}
+
+# Ensure zero null is fitted with score cache.
+ensure_null_zero <- function(null_fit_zero, Z_null, y,
+                             offsetz = NULL, weights = NULL) {
+  n <- length(y)
+  if (is.null(offsetz)) offsetz <- rep.int(0, n)
+  if (is.null(weights)) weights <- rep.int(1, n)
+
+  if (is.null(null_fit_zero) ||
+    !inherits(null_fit_zero, "fasthurdle_null_zero")) {
+    null_fit_zero <- fit_null_zero(
+      Z_null, y,
+      offsetz = offsetz, weights = weights
+    )
+  }
+  null_fit_zero
 }

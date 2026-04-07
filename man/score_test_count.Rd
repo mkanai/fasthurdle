@@ -2,7 +2,7 @@
 % Please edit documentation in R/score_test.R
 \name{score_test_count}
 \alias{score_test_count}
-\title{Score Test for Count Component of Hurdle Model}
+\title{Score test for the count component of a hurdle model}
 \usage{
 score_test_count(
   X_null,
@@ -18,59 +18,35 @@ score_test_count(
 )
 }
 \arguments{
-\item{X_null}{Model matrix for the null model (intercept + covariates).}
+\item{X_null}{Null model matrix (n x kx_null).}
 
-\item{x_test}{Test variable vector or single-column matrix.}
+\item{x_test}{Test variable vector (length n).}
 
-\item{y}{Response vector of counts.}
+\item{y}{Response vector.}
 
-\item{offsetx}{Optional offset vector. Default is NULL (no offset).}
+\item{offsetx}{Offset vector (default: zeros).}
 
-\item{weights}{Optional weight vector. Default is NULL (unit weights).}
+\item{weights}{Weight vector (default: ones).}
 
-\item{dist}{Count distribution: "negbin", "poisson", or "geometric".}
+\item{dist}{Count distribution: \code{"negbin"}, \code{"poisson"}, or
+\code{"geometric"}.}
 
-\item{null_fit_count}{Optional. A pre-fitted null model from \code{\link{fit_null_count}}.
-If provided, the null model is not re-fitted, saving computation time.}
+\item{null_fit_count}{Fitted null model from \code{\link{fit_null_count}}.
+If NULL, fitted internally.}
 
-\item{spa_cutoff}{Numeric or NULL. Apply saddlepoint approximation (SPA) for
-p-values when |z| exceeds this cutoff. Default is \code{NULL} (disabled).
-Set to \code{2} to enable SPA for improved tail accuracy at small sample sizes.}
+\item{spa_cutoff}{Saddlepoint approximation cutoff. NULL or Inf disables SPA.}
 
-\item{method}{Optimization method for fitting the null model (ignored if null_fit_count
-is provided). Default is "BFGS".}
+\item{method}{Optimization method for null model fitting (default: "BFGS").}
 
-\item{maxit}{Maximum iterations for the null model (ignored if null_fit_count is provided).
-Default is 10000.}
+\item{maxit}{Maximum iterations for null model fitting.}
 }
 \value{
-A list with components:
-  \item{beta}{Effect size estimate. For significant tests (|z| > \code{spa_cutoff},
-    or |z| > 2 when SPA is disabled), refined via 5-iteration BFGS from the score
-    estimate (within ~3\% of full MLE). For non-significant tests, uses the ratio
-    estimator (approximate).}
-  \item{se}{Standard error, back-computed from the p-value for consistency.}
-  \item{statistic}{The score test statistic (chi-squared, using observed information).}
-  \item{pvalue}{The p-value. SPA-adjusted when |z| > \code{spa_cutoff}.}
-  \item{spa_applied}{Logical. Whether SPA was applied.}
-  \item{null_par}{The null model MLE parameters.}
-  \item{null_convergence}{Convergence status of the null model.}
+A list with components \code{beta}, \code{se}, \code{statistic},
+  \code{pvalue}, \code{spa_applied}, \code{null_par}, \code{null_convergence}.
 }
 \description{
-Computes the score test for a single predictor in the count component
-of a hurdle model. The score test evaluates the score statistic at the null
-MLE using the observed information (negative Hessian) instead of the expected
-Fisher information, making it robust to model misspecification.
-}
-\examples{
-\dontrun{
-# One-shot usage
-result <- score_test_count(X_null, x_test, y, dist = "negbin")
-
-# With cached null model (for testing many x_test variables)
-null_fit_count <- fit_null_count(X_null, y, dist = "negbin")
-result1 <- score_test_count(X_null, x_test1, y, null_fit_count = null_fit_count)
-result2 <- score_test_count(X_null, x_test2, y, null_fit_count = null_fit_count)
-}
-
+Tests whether a single test variable has a significant effect on the count
+component, using a score test with observed information. Uses pre-cached
+null quantities for O(n_pos) per-peak computation. Supports all count
+distributions (negbin, poisson, geometric).
 }

@@ -37,23 +37,27 @@ optim_joint_cpp <- function(start, Y, X, offsetx, Z, offsetz, weights, dist = "p
     .Call(`_fasthurdle_optim_joint_cpp`, start, Y, X, offsetx, Z, offsetz, weights, dist, zero_dist, link, method, hessian, maxit, reltol)
 }
 
-score_test_count_cpp <- function(null_par, Y, X_null, X_full, offsetx, weights, dist = "negbin", use_spa = FALSE, spa_cutoff = 2.0) {
-    .Call(`_fasthurdle_score_test_count_cpp`, null_par, Y, X_null, X_full, offsetx, weights, dist, use_spa, spa_cutoff)
+prepare_score_cache_zero_cpp <- function(null_par, Y, Z_null, offsetz, weights) {
+    .Call(`_fasthurdle_prepare_score_cache_zero_cpp`, null_par, Y, Z_null, offsetz, weights)
 }
 
-score_test_zero_cpp <- function(null_par, Y, Z_null, Z_full, offsetz, weights, use_spa = FALSE, spa_cutoff = 2.0) {
-    .Call(`_fasthurdle_score_test_zero_cpp`, null_par, Y, Z_null, Z_full, offsetz, weights, use_spa, spa_cutoff)
+score_test_zero_cpp <- function(z_test, W_resid, W_diag, I_nn_inv, Znull_W_t, p_null, Y, Z_null, offsetz, weights, null_par, kz_null, use_spa = FALSE, spa_cutoff = 2.0) {
+    .Call(`_fasthurdle_score_test_zero_cpp`, z_test, W_resid, W_diag, I_nn_inv, Znull_W_t, p_null, Y, Z_null, offsetz, weights, null_par, kz_null, use_spa, spa_cutoff)
 }
 
 compute_negbin_hurdle_fitted_cpp <- function(coefc, coefz, X, Z, offsetx, offsetz, theta, y) {
     .Call(`_fasthurdle_compute_negbin_hurdle_fitted_cpp`, coefc, coefz, X, Z, offsetx, offsetz, theta, y)
 }
 
-prepare_score_cache_nb_cpp <- function(null_par, Y, X_null, offsetx, weights) {
-    .Call(`_fasthurdle_prepare_score_cache_nb_cpp`, null_par, Y, X_null, offsetx, weights)
+prepare_score_cache_count_cpp <- function(null_par, Y, X_null, offsetx, weights, dist = "negbin") {
+    .Call(`_fasthurdle_prepare_score_cache_count_cpp`, null_par, Y, X_null, offsetx, weights, dist)
 }
 
-score_test_count_cached_cpp <- function(x_test, Y1, grad_weights, v_ee, v_et, Y_pos, I_nn_inv, I_nn_beta_inv, beta_inv_ok, Xnull_vee_t, X_null_pos, off_pos, w_pos, theta, beta_null, mu_pos, p0_pos, log_p1_pos, kx_null, use_spa = FALSE, spa_cutoff = 2.0) {
-    .Call(`_fasthurdle_score_test_count_cached_cpp`, x_test, Y1, grad_weights, v_ee, v_et, Y_pos, I_nn_inv, I_nn_beta_inv, beta_inv_ok, Xnull_vee_t, X_null_pos, off_pos, w_pos, theta, beta_null, mu_pos, p0_pos, log_p1_pos, kx_null, use_spa, spa_cutoff)
+score_test_count_cpp <- function(x_test, Y1, grad_weights, v_ee, Y_pos, I_nn_inv, I_nn_beta_inv, beta_inv_ok, Xnull_vee_t, X_null_pos, w_pos, theta, beta_null, eta_null_pos, mu_pos, p0_pos, log_p1_pos, kx_null, has_theta = TRUE, use_spa = FALSE, spa_cutoff = 2.0, v_et_nullable = NULL) {
+    .Call(`_fasthurdle_score_test_count_cpp`, x_test, Y1, grad_weights, v_ee, Y_pos, I_nn_inv, I_nn_beta_inv, beta_inv_ok, Xnull_vee_t, X_null_pos, w_pos, theta, beta_null, eta_null_pos, mu_pos, p0_pos, log_p1_pos, kx_null, has_theta, use_spa, spa_cutoff, v_et_nullable)
+}
+
+score_test_count_batch_cpp <- function(X_test_pos, Y1, grad_weights, v_ee, Y_pos, I_nn_inv, I_nn_beta_inv, beta_inv_ok, Xnull_vee_t, X_null_pos, w_pos, theta, beta_null, eta_null_pos, mu_pos, p0_pos, log_p1_pos, kx_null, has_theta, use_spa, spa_cutoff, v_et_nullable) {
+    .Call(`_fasthurdle_score_test_count_batch_cpp`, X_test_pos, Y1, grad_weights, v_ee, Y_pos, I_nn_inv, I_nn_beta_inv, beta_inv_ok, Xnull_vee_t, X_null_pos, w_pos, theta, beta_null, eta_null_pos, mu_pos, p0_pos, log_p1_pos, kx_null, has_theta, use_spa, spa_cutoff, v_et_nullable)
 }
 

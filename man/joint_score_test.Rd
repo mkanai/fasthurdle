@@ -42,7 +42,7 @@ A data.frame with columns:
   \item{sig_zero}{Logical; zero component significant after Holm correction.}
   \item{sig_count}{Logical; count component significant after Holm correction.}
   \item{mode}{Factor classifying the regulatory mode as "dual", "switch",
-    "rheostat", "joint_only", or "not_significant".}
+    "rheostat", "omnibus_only", or "not_significant".}
   \item{sig}{Logical; TRUE if mode is not "not_significant".}
 }
 \description{

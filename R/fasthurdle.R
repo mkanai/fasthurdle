@@ -260,7 +260,7 @@ fasthurdle <- function(formula, data, subset, na.action, weights, offset,
     )
     # Zero score test (logit/binomial only)
     if (zero.dist == "binomial" && linkstr == "logit" &&
-        score_test %in% colnames(Z)) {
+      score_test %in% colnames(Z)) {
       zero_test_idx <- match(score_test, colnames(Z))
       zero_null_idx <- setdiff(seq_len(kz), zero_test_idx)
       Z_null_st <- Z[, zero_null_idx, drop = FALSE]

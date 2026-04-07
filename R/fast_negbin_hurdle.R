@@ -142,7 +142,7 @@ fast_negbin_hurdle <- function(X, y, Z = NULL, offsetx = NULL, offsetz = NULL,
 
     # Prepare score cache for fast per-peak testing (one-time cost)
     if (is.null(null_fit_count$score_cache)) {
-      null_fit_count <- prepare_score_cache(
+      null_fit_count <- prepare_score_cache_count(
         null_fit_count, y, X_null, offsetx = offsetx, weights = weights
       )
     }

@@ -138,7 +138,7 @@ jiang_doerge_fdr <- function(p_stage1, p_stage2, alpha1 = 0.1, alpha2 = 0.05) {
 #'   \item{sig_zero}{Logical; zero component significant after Holm correction.}
 #'   \item{sig_count}{Logical; count component significant after Holm correction.}
 #'   \item{mode}{Factor classifying the regulatory mode as "dual", "switch",
-#'     "rheostat", "joint_only", or "not_significant".}
+#'     "rheostat", "omnibus_only", or "not_significant".}
 #'   \item{sig}{Logical; TRUE if mode is not "not_significant".}
 #' @references
 #' Van den Berge, K., et al. (2017). stageR: a general stage-wise method for
@@ -184,9 +184,9 @@ acat_stagewise <- function(p_zero, p_count, alpha = 0.05) {
   mode[selected & sig_zero & sig_count] <- "dual"
   mode[selected & sig_zero & !sig_count] <- "switch"
   mode[selected & !sig_zero & sig_count] <- "rheostat"
-  mode[selected & !sig_zero & !sig_count] <- "joint_only"
+  mode[selected & !sig_zero & !sig_count] <- "omnibus_only"
   mode <- factor(mode,
-    levels = c("dual", "switch", "rheostat", "joint_only", "not_significant")
+    levels = c("dual", "switch", "rheostat", "omnibus_only", "not_significant")
   )
 
   data.frame(
@@ -236,7 +236,7 @@ acat_stagewise <- function(p_zero, p_count, alpha = 0.05) {
 #'   \item{sig_zero}{Logical; zero component significant after Holm correction.}
 #'   \item{sig_count}{Logical; count component significant after Holm correction.}
 #'   \item{mode}{Factor classifying the regulatory mode as "dual", "switch",
-#'     "rheostat", "joint_only", or "not_significant".}
+#'     "rheostat", "omnibus_only", or "not_significant".}
 #'   \item{sig}{Logical; TRUE if mode is not "not_significant".}
 #' @references
 #' Van den Berge, K., et al. (2017). stageR: a general stage-wise method for
@@ -308,9 +308,9 @@ joint_score_test <- function(p_zero = NULL, p_count = NULL,
   mode[selected & sig_zero & sig_count] <- "dual"
   mode[selected & sig_zero & !sig_count] <- "switch"
   mode[selected & !sig_zero & sig_count] <- "rheostat"
-  mode[selected & !sig_zero & !sig_count] <- "joint_only"
+  mode[selected & !sig_zero & !sig_count] <- "omnibus_only"
   mode <- factor(mode,
-    levels = c("dual", "switch", "rheostat", "joint_only", "not_significant")
+    levels = c("dual", "switch", "rheostat", "omnibus_only", "not_significant")
   )
 
   data.frame(
