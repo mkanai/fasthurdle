@@ -302,8 +302,9 @@ double spa_pvalue_twosided(double q, double pval_nospa, double theta,
 }
 
 // ==========================================================================
-// Score test for count component: unified path via prepare_score_cache_count_cpp +
-// score_test_count_cpp (defined below in the cached section).
+// Score test for count component: unified path via
+// prepare_score_cache_count_cpp + score_test_count_cpp (defined below in the
+// cached section).
 // ==========================================================================
 
 // ==========================================================================
@@ -431,11 +432,11 @@ double spa_pvalue_twosided_binom(double q, double pval_nospa,
 // ==========================================================================
 
 // [[Rcpp::export]]
-Rcpp::List prepare_score_cache_zero_cpp(
-    const arma::vec &null_par, const arma::vec &Y,
-    const arma::mat &Z_null, const arma::vec &offsetz,
-    const arma::vec &weights) {
-
+Rcpp::List prepare_score_cache_zero_cpp(const arma::vec &null_par,
+                                        const arma::vec &Y,
+                                        const arma::mat &Z_null,
+                                        const arma::vec &offsetz,
+                                        const arma::vec &weights) {
   int kz_null = Z_null.n_cols;
   int n = Y.n_elem;
 
@@ -470,13 +471,10 @@ Rcpp::List prepare_score_cache_zero_cpp(
   arma::vec p_null_cache = p_null;
 
   return Rcpp::List::create(
-    Rcpp::Named("valid") = true,
-    Rcpp::Named("W_resid") = W_resid,
-    Rcpp::Named("W_diag") = W_diag,
-    Rcpp::Named("I_nn_inv") = I_nn_inv,
-    Rcpp::Named("Znull_W_t") = Znull_W_t,
-    Rcpp::Named("p_null") = p_null_cache,
-    Rcpp::Named("kz_null") = kz_null);
+      Rcpp::Named("valid") = true, Rcpp::Named("W_resid") = W_resid,
+      Rcpp::Named("W_diag") = W_diag, Rcpp::Named("I_nn_inv") = I_nn_inv,
+      Rcpp::Named("Znull_W_t") = Znull_W_t,
+      Rcpp::Named("p_null") = p_null_cache, Rcpp::Named("kz_null") = kz_null);
 }
 
 // Joint IRLS refinement for logistic (zero component) test variable.
@@ -491,13 +489,12 @@ static double refine_beta_joint_logistic(
     const arma::vec &weights,   // prior weights
     arma::vec &beta_null,       // in/out: null fixed effects
     int max_iter = 3) {
-
-  const int n  = z_test.n_elem;
+  const int n = z_test.n_elem;
   const int kz = Z_null.n_cols;
   double beta_test = beta_init;
 
   arma::vec W_vec(n), z_vec(n), eta(n);
-  arma::vec off = eta_null - Z_null * beta_null; // offset + random effects
+  arma::vec off = eta_null - Z_null * beta_null;  // offset + random effects
 
   for (int iter = 0; iter < max_iter; iter++) {
     eta = Z_null * beta_null + off + beta_test * z_test;
@@ -505,15 +502,15 @@ static double refine_beta_joint_logistic(
     for (int i = 0; i < n; i++) {
       double mu_i = 1.0 / (1.0 + std::exp(-eta(i)));
       mu_i = std::max(1e-10, std::min(1.0 - 1e-10, mu_i));
-      double D_i  = mu_i * (1.0 - mu_i);
+      double D_i = mu_i * (1.0 - mu_i);
       W_vec(i) = D_i * weights(i);
       z_vec(i) = (eta(i) - off(i)) + (y_bin(i) - mu_i) / D_i;
     }
 
-    arma::vec Wz_t      = W_vec % z_test;
-    arma::mat WZ        = Z_null.each_col() % W_vec;
-    arma::mat ZtWZ      = Z_null.t() * WZ;
-    arma::vec ZtWz_t    = Z_null.t() * Wz_t;
+    arma::vec Wz_t = W_vec % z_test;
+    arma::mat WZ = Z_null.each_col() % W_vec;
+    arma::mat ZtWZ = Z_null.t() * WZ;
+    arma::vec ZtWz_t = Z_null.t() * Wz_t;
     arma::vec ZtWz_resp = Z_null.t() * (W_vec % z_vec);
 
     arma::mat ZtWZ_inv;
@@ -522,10 +519,10 @@ static double refine_beta_joint_logistic(
     if (!ok) ok = arma::inv(ZtWZ_inv, ZtWZ);
     if (!ok) break;
 
-    double zWz_resp      = arma::dot(Wz_t, z_vec);
-    double zWz           = arma::dot(Wz_t, z_test);
+    double zWz_resp = arma::dot(Wz_t, z_vec);
+    double zWz = arma::dot(Wz_t, z_test);
     double zt_inv_zz_resp = arma::dot(ZtWz_t, ZtWZ_inv * ZtWz_resp);
-    double zt_inv_zz      = arma::dot(ZtWz_t, ZtWZ_inv * ZtWz_t);
+    double zt_inv_zz = arma::dot(ZtWz_t, ZtWZ_inv * ZtWz_t);
     double denom = zWz - zt_inv_zz;
     if (denom <= 0 || !std::isfinite(denom)) break;
 
@@ -544,20 +541,18 @@ static double refine_beta_joint_logistic(
 // Per-peak zero score test
 // [[Rcpp::export]]
 Rcpp::List score_test_zero_cpp(
-    const arma::vec &z_test,           // n
-    const arma::vec &W_resid,          // n (cached: w * (y - p))
-    const arma::vec &W_diag,           // n (cached: w * p * (1-p))
-    const arma::mat &I_nn_inv,         // kz x kz
-    const arma::mat &Znull_W_t,        // kz x n
-    const arma::vec &p_null,           // n (for SPA)
-    const arma::vec &Y,                // n (for beta refinement)
-    const arma::mat &Z_null,           // n x kz (for SPA projection + refinement)
-    const arma::vec &offsetz,          // n
-    const arma::vec &weights,          // n
-    const arma::vec &null_par,         // kz (for beta refinement)
-    int kz_null,
-    bool use_spa = false, double spa_cutoff = 2.0) {
-
+    const arma::vec &z_test,     // n
+    const arma::vec &W_resid,    // n (cached: w * (y - p))
+    const arma::vec &W_diag,     // n (cached: w * p * (1-p))
+    const arma::mat &I_nn_inv,   // kz x kz
+    const arma::mat &Znull_W_t,  // kz x n
+    const arma::vec &p_null,     // n (for SPA)
+    const arma::vec &Y,          // n (for beta refinement)
+    const arma::mat &Z_null,     // n x kz (for SPA projection + refinement)
+    const arma::vec &offsetz,    // n
+    const arma::vec &weights,    // n
+    const arma::vec &null_par,   // kz (for beta refinement)
+    int kz_null, bool use_spa = false, double spa_cutoff = 2.0) {
   // Score: U = dot(W_resid, z_test)
   double U_test = arma::dot(W_resid, z_test);
 
@@ -572,11 +567,10 @@ Rcpp::List score_test_zero_cpp(
 
   if (I_eff <= 0 || !std::isfinite(I_eff)) {
     return Rcpp::List::create(
-      Rcpp::Named("beta") = Rcpp::NumericVector::create(NA_REAL),
-      Rcpp::Named("se") = Rcpp::NumericVector::create(NA_REAL),
-      Rcpp::Named("statistic") = NA_REAL,
-      Rcpp::Named("pvalue") = NA_REAL,
-      Rcpp::Named("spa_applied") = false);
+        Rcpp::Named("beta") = Rcpp::NumericVector::create(NA_REAL),
+        Rcpp::Named("se") = Rcpp::NumericVector::create(NA_REAL),
+        Rcpp::Named("statistic") = NA_REAL, Rcpp::Named("pvalue") = NA_REAL,
+        Rcpp::Named("spa_applied") = false);
   }
 
   double T_stat = U_test * U_test / I_eff;
@@ -597,7 +591,9 @@ Rcpp::List score_test_zero_cpp(
       double pi = p_null(i);
       if (pi < 1e-15 || pi > 1.0 - 1e-15) continue;
       BinomCgfObsCache obs;
-      obs.pi = pi; obs.gi = gi; obs.wi = weights(i);
+      obs.pi = pi;
+      obs.gi = gi;
+      obs.wi = weights(i);
       cgf_cache.push_back(obs);
     }
     if (!cgf_cache.empty()) {
@@ -623,7 +619,7 @@ Rcpp::List score_test_zero_cpp(
     }
     arma::vec bn = null_par;
     double beta_refined = refine_beta_joint_logistic(
-      beta_hat, z_test, y_bin, eta_null, Z_null, weights, bn);
+        beta_hat, z_test, y_bin, eta_null, Z_null, weights, bn);
     if (std::isfinite(beta_refined)) beta_hat = beta_refined;
   }
 
@@ -636,11 +632,10 @@ Rcpp::List score_test_zero_cpp(
   }
 
   return Rcpp::List::create(
-    Rcpp::Named("beta") = Rcpp::NumericVector::create(beta_hat),
-    Rcpp::Named("se") = Rcpp::NumericVector::create(se_hat),
-    Rcpp::Named("statistic") = T_stat,
-    Rcpp::Named("pvalue") = pvalue,
-    Rcpp::Named("spa_applied") = spa_applied);
+      Rcpp::Named("beta") = Rcpp::NumericVector::create(beta_hat),
+      Rcpp::Named("se") = Rcpp::NumericVector::create(se_hat),
+      Rcpp::Named("statistic") = T_stat, Rcpp::Named("pvalue") = pvalue,
+      Rcpp::Named("spa_applied") = spa_applied);
 }
 
 // [[Rcpp::export]]
@@ -677,12 +672,12 @@ Rcpp::List compute_negbin_hurdle_fitted_cpp(
 // ==========================================================================
 
 // [[Rcpp::export]]
-Rcpp::List prepare_score_cache_count_cpp(
-    const arma::vec &null_par, const arma::vec &Y,
-    const arma::mat &X_null, const arma::vec &offsetx,
-    const arma::vec &weights,
-    const std::string &dist = "negbin") {
-
+Rcpp::List prepare_score_cache_count_cpp(const arma::vec &null_par,
+                                         const arma::vec &Y,
+                                         const arma::mat &X_null,
+                                         const arma::vec &offsetx,
+                                         const arma::vec &weights,
+                                         const std::string &dist = "negbin") {
   int kx_null = X_null.n_cols;
   bool has_theta = (dist == "negbin");
   double theta;
@@ -731,9 +726,10 @@ Rcpp::List prepare_score_cache_count_cpp(
   }
 
   // Single pass: compute all null-only quantities
-  arma::vec grad_weights(n_pos);  // w * grad_term (for U = dot(grad_weights, x_test_pos))
-  arma::vec v_ee(n_pos);          // Hessian beta-beta weight per obs
-  arma::vec v_et;                 // Hessian beta-theta weight per obs (negbin only)
+  arma::vec grad_weights(
+      n_pos);  // w * grad_term (for U = dot(grad_weights, x_test_pos))
+  arma::vec v_ee(n_pos);  // Hessian beta-beta weight per obs
+  arma::vec v_et;         // Hessian beta-theta weight per obs (negbin only)
   double v_tt_sum = 0.0;
   if (has_theta) v_et.set_size(n_pos);
   arma::vec mu_pos(n_pos), p0_pos(n_pos), log_p1_pos(n_pos);
@@ -799,14 +795,15 @@ Rcpp::List prepare_score_cache_count_cpp(
       double I_ZT_tt = r * a_tt + r * (1.0 + r) * a_theta * a_theta;
       double first_deriv_theta = b + r * a_theta;
       double second_deriv_theta = c + I_ZT_tt;
-      v_tt_sum += w_pos(i) *
-                  (-theta * first_deriv_theta - theta * theta * second_deriv_theta);
+      v_tt_sum += w_pos(i) * (-theta * first_deriv_theta -
+                              theta * theta * second_deriv_theta);
     }
   }
 
   // Assemble null FIM block
-  // has_theta: I_nn = [X' diag(v_ee) X, X' v_et; v_et' X, v_tt_sum], (kx_null+1) x (kx_null+1)
-  // !has_theta: I_nn = X' diag(v_ee) X, kx_null x kx_null
+  // has_theta: I_nn = [X' diag(v_ee) X, X' v_et; v_et' X, v_tt_sum],
+  // (kx_null+1) x (kx_null+1) !has_theta: I_nn = X' diag(v_ee) X, kx_null x
+  // kx_null
   int np_null = has_theta ? kx_null + 1 : kx_null;
   arma::mat I_nn(np_null, np_null, arma::fill::zeros);
   arma::mat X_vee = X_null_pos.each_col() % v_ee;
@@ -847,25 +844,18 @@ Rcpp::List prepare_score_cache_count_cpp(
   arma::vec eta_null_pos = X_null_pos * beta_null + off_pos;
 
   Rcpp::List result = Rcpp::List::create(
-    Rcpp::Named("valid") = true,
-    Rcpp::Named("has_theta") = has_theta,
-    Rcpp::Named("Y1") = Y1,
-    Rcpp::Named("Y_pos") = Y_pos,
-    Rcpp::Named("grad_weights") = grad_weights,
-    Rcpp::Named("v_ee") = v_ee,
-    Rcpp::Named("I_nn_inv") = I_nn_inv,
-    Rcpp::Named("I_nn_beta_inv") = I_nn_beta_inv,
-    Rcpp::Named("beta_inv_ok") = beta_inv_ok,
-    Rcpp::Named("Xnull_vee_t") = Xnull_vee_t,
-    Rcpp::Named("X_null_pos") = X_null_pos,
-    Rcpp::Named("w_pos") = w_pos,
-    Rcpp::Named("theta") = theta,
-    Rcpp::Named("beta_null") = beta_null,
-    Rcpp::Named("eta_null_pos") = eta_null_pos,
-    Rcpp::Named("mu_pos") = mu_pos,
-    Rcpp::Named("p0_pos") = p0_pos,
-    Rcpp::Named("log_p1_pos") = log_p1_pos,
-    Rcpp::Named("kx_null") = kx_null);
+      Rcpp::Named("valid") = true, Rcpp::Named("has_theta") = has_theta,
+      Rcpp::Named("Y1") = Y1, Rcpp::Named("Y_pos") = Y_pos,
+      Rcpp::Named("grad_weights") = grad_weights, Rcpp::Named("v_ee") = v_ee,
+      Rcpp::Named("I_nn_inv") = I_nn_inv,
+      Rcpp::Named("I_nn_beta_inv") = I_nn_beta_inv,
+      Rcpp::Named("beta_inv_ok") = beta_inv_ok,
+      Rcpp::Named("Xnull_vee_t") = Xnull_vee_t,
+      Rcpp::Named("X_null_pos") = X_null_pos, Rcpp::Named("w_pos") = w_pos,
+      Rcpp::Named("theta") = theta, Rcpp::Named("beta_null") = beta_null,
+      Rcpp::Named("eta_null_pos") = eta_null_pos,
+      Rcpp::Named("mu_pos") = mu_pos, Rcpp::Named("p0_pos") = p0_pos,
+      Rcpp::Named("log_p1_pos") = log_p1_pos, Rcpp::Named("kx_null") = kx_null);
   if (has_theta) {
     result["v_et"] = v_et;
   }
@@ -879,12 +869,11 @@ Rcpp::List prepare_score_cache_count_cpp(
 // Cost: O(n_pos * kx) per iteration (dominated by ZTNB wq, same as 1D).
 static double refine_beta_joint_ztnb(
     double beta_init, const arma::vec &x_pos, const arma::vec &y_pos,
-    const arma::vec &eta_null_pos,   // null eta (X*beta_null + offset)
-    const arma::mat &X_null_pos,     // n_pos x kx
+    const arma::vec &eta_null_pos,  // null eta (X*beta_null + offset)
+    const arma::mat &X_null_pos,    // n_pos x kx
     const arma::vec &w_pos, double theta,
-    arma::vec &beta_null,            // in/out: updated jointly
+    arma::vec &beta_null,  // in/out: updated jointly
     int max_iter = 3) {
-
   const double theta_f = std::max(theta, 0.01);
   const int n_pos = x_pos.n_elem;
   const int kx = X_null_pos.n_cols;
@@ -907,14 +896,16 @@ static double refine_beta_joint_ztnb(
 
       if (eta_i > 700.0) {
         mu = std::exp(std::min(eta_i, 700.0));
-        mu_t = mu; D_val = mu;
+        mu_t = mu;
+        D_val = mu;
         W_val = theta_f * w_pos(i);
       } else {
         mu = std::exp(eta_i);
         double A = mu + theta_f;
         double log_p0 = theta_f * std::log(theta_f / A);
         if (log_p0 < -30.0) {
-          mu_t = mu; D_val = mu;
+          mu_t = mu;
+          D_val = mu;
           W_val = theta_f * mu / A * w_pos(i);
         } else {
           double p0 = std::exp(log_p0);
@@ -926,7 +917,8 @@ static double refine_beta_joint_ztnb(
           D_val = dmu_t_dmu * mu;
           double dnb1 = p0 * theta_f * mu / A;
           double mu_star = mu + A * dnb1 / (theta_f * p1);
-          double V = mu_star + mu_star * mu * (1.0 + 1.0 / theta_f) - mu_star * mu_star;
+          double V = mu_star + mu_star * mu * (1.0 + 1.0 / theta_f) -
+                     mu_star * mu_star;
           if (V < 1e-300) V = 1e-300;
           W_val = D_val * D_val / V * w_pos(i);
         }
@@ -940,8 +932,8 @@ static double refine_beta_joint_ztnb(
     // Schur complement solve for beta_test (profiling out beta_null)
     arma::vec Wx = W_vec % x_pos;
     arma::mat WX = X_null_pos.each_col() % W_vec;
-    arma::mat XtWX = X_null_pos.t() * WX;           // kx x kx
-    arma::vec XtWx = X_null_pos.t() * Wx;            // kx x 1
+    arma::mat XtWX = X_null_pos.t() * WX;  // kx x kx
+    arma::vec XtWx = X_null_pos.t() * Wx;  // kx x 1
     arma::vec XtWz = X_null_pos.t() * (W_vec % z_vec);
 
     arma::mat XtWX_inv;
@@ -962,7 +954,8 @@ static double refine_beta_joint_ztnb(
     double beta_test_new = (xWz - xt_inv_xz) / denom;
     beta_null = XtWX_inv * (XtWz - XtWx * beta_test_new);
 
-    if (std::abs(beta_test_new - beta_test) < 1e-6 * (std::abs(beta_test) + 1e-8)) {
+    if (std::abs(beta_test_new - beta_test) <
+        1e-6 * (std::abs(beta_test) + 1e-8)) {
       beta_test = beta_test_new;
       break;
     }
@@ -976,28 +969,28 @@ static double refine_beta_joint_ztnb(
 // Cache must be prepared via prepare_score_cache_count_cpp first.
 // [[Rcpp::export]]
 Rcpp::List score_test_count_cpp(
-    const arma::vec &x_test,          // length n (full)
-    const arma::uvec &Y1,             // pos indices (0-based)
-    const arma::vec &grad_weights,    // n_pos
-    const arma::vec &v_ee,            // n_pos
-    const arma::vec &Y_pos,           // positive counts (for IRLS refinement)
-    const arma::mat &I_nn_inv,        // np_null x np_null inverse
-    const arma::mat &I_nn_beta_inv,   // beta-only FIM block inverse (for SPA)
+    const arma::vec &x_test,         // length n (full)
+    const arma::uvec &Y1,            // pos indices (0-based)
+    const arma::vec &grad_weights,   // n_pos
+    const arma::vec &v_ee,           // n_pos
+    const arma::vec &Y_pos,          // positive counts (for IRLS refinement)
+    const arma::mat &I_nn_inv,       // np_null x np_null inverse
+    const arma::mat &I_nn_beta_inv,  // beta-only FIM block inverse (for SPA)
     bool beta_inv_ok,
-    const arma::mat &Xnull_vee_t,     // kx_null x n_pos
-    const arma::mat &X_null_pos,      // n_pos x kx_null
-    const arma::vec &w_pos,           // n_pos
+    const arma::mat &Xnull_vee_t,  // kx_null x n_pos
+    const arma::mat &X_null_pos,   // n_pos x kx_null
+    const arma::vec &w_pos,        // n_pos
     double theta,
-    const arma::vec &beta_null,       // kx_null (for joint refinement)
-    const arma::vec &eta_null_pos,    // n_pos (pre-computed null eta)
-    const arma::vec &mu_pos,          // n_pos (for SPA)
-    const arma::vec &p0_pos,          // n_pos (for SPA)
-    const arma::vec &log_p1_pos,      // n_pos (for SPA)
+    const arma::vec &beta_null,     // kx_null (for joint refinement)
+    const arma::vec &eta_null_pos,  // n_pos (pre-computed null eta)
+    const arma::vec &mu_pos,        // n_pos (for SPA)
+    const arma::vec &p0_pos,        // n_pos (for SPA)
+    const arma::vec &log_p1_pos,    // n_pos (for SPA)
     int kx_null,
-    bool has_theta = true,            // true for negbin (FIM includes theta), false for poisson/geometric
+    bool has_theta = true,  // true for negbin (FIM includes theta), false for
+                            // poisson/geometric
     bool use_spa = false, double spa_cutoff = 2.0,
     Rcpp::Nullable<arma::vec> v_et_nullable = R_NilValue) {
-
   arma::vec x_pos = x_test.elem(Y1);
 
   // 1. Score: single O(n_pos) dot product
@@ -1023,11 +1016,10 @@ Rcpp::List score_test_count_cpp(
 
   if (I_eff <= 0 || !std::isfinite(I_eff)) {
     return Rcpp::List::create(
-      Rcpp::Named("beta") = arma::vec(1, arma::fill::value(NA_REAL)),
-      Rcpp::Named("se") = arma::vec(1, arma::fill::value(NA_REAL)),
-      Rcpp::Named("statistic") = NA_REAL,
-      Rcpp::Named("pvalue") = NA_REAL,
-      Rcpp::Named("spa_applied") = false);
+        Rcpp::Named("beta") = arma::vec(1, arma::fill::value(NA_REAL)),
+        Rcpp::Named("se") = arma::vec(1, arma::fill::value(NA_REAL)),
+        Rcpp::Named("statistic") = NA_REAL, Rcpp::Named("pvalue") = NA_REAL,
+        Rcpp::Named("spa_applied") = false);
   }
 
   double T_stat = U_test * U_test / I_eff;
@@ -1051,14 +1043,14 @@ Rcpp::List score_test_count_cpp(
     }
   }
 
-  // Joint IRLS refinement: 3 iterations jointly re-estimating beta_null + beta_test
-  // via Schur complement. O(n_pos * kx) per iter, matches full MLE within ~1%.
+  // Joint IRLS refinement: 3 iterations jointly re-estimating beta_null +
+  // beta_test via Schur complement. O(n_pos * kx) per iter, matches full MLE
+  // within ~1%.
   double refine_cutoff = use_spa ? spa_cutoff : 2.0;
   if (std::sqrt(T_stat) > refine_cutoff) {
     arma::vec bn = beta_null;  // mutable copy for joint update
-    beta_hat = refine_beta_joint_ztnb(beta_hat, x_pos, Y_pos,
-                                       eta_null_pos, X_null_pos,
-                                       w_pos, theta, bn);
+    beta_hat = refine_beta_joint_ztnb(beta_hat, x_pos, Y_pos, eta_null_pos,
+                                      X_null_pos, w_pos, theta, bn);
   }
 
   // Back-compute SE from p-value
@@ -1078,11 +1070,9 @@ Rcpp::List score_test_count_cpp(
   arma::vec se_vec(1);
   se_vec(0) = se_hat;
   return Rcpp::List::create(
-    Rcpp::Named("beta") = beta_vec,
-    Rcpp::Named("se") = se_vec,
-    Rcpp::Named("statistic") = T_stat,
-    Rcpp::Named("pvalue") = pvalue,
-    Rcpp::Named("spa_applied") = spa_applied);
+      Rcpp::Named("beta") = beta_vec, Rcpp::Named("se") = se_vec,
+      Rcpp::Named("statistic") = T_stat, Rcpp::Named("pvalue") = pvalue,
+      Rcpp::Named("spa_applied") = spa_applied);
 }
 
 // ==========================================================================
@@ -1092,28 +1082,16 @@ Rcpp::List score_test_count_cpp(
 
 // [[Rcpp::export]]
 Rcpp::List score_test_count_batch_cpp(
-    const arma::mat &X_test_pos,
-    const arma::uvec &Y1,
-    const arma::vec &grad_weights,
-    const arma::vec &v_ee,
-    const arma::vec &Y_pos,
-    const arma::mat &I_nn_inv,
-    const arma::mat &I_nn_beta_inv,
-    bool beta_inv_ok,
-    const arma::mat &Xnull_vee_t,
-    const arma::mat &X_null_pos,
-    const arma::vec &w_pos,
-    double theta,
-    const arma::vec &beta_null,
-    const arma::vec &eta_null_pos,
-    const arma::vec &mu_pos,
-    const arma::vec &p0_pos,
-    const arma::vec &log_p1_pos,
-    int kx_null,
-    bool has_theta,
-    bool use_spa, double spa_cutoff,
+    const arma::mat &X_test_pos, const arma::uvec &Y1,
+    const arma::vec &grad_weights, const arma::vec &v_ee,
+    const arma::vec &Y_pos, const arma::mat &I_nn_inv,
+    const arma::mat &I_nn_beta_inv, bool beta_inv_ok,
+    const arma::mat &Xnull_vee_t, const arma::mat &X_null_pos,
+    const arma::vec &w_pos, double theta, const arma::vec &beta_null,
+    const arma::vec &eta_null_pos, const arma::vec &mu_pos,
+    const arma::vec &p0_pos, const arma::vec &log_p1_pos, int kx_null,
+    bool has_theta, bool use_spa, double spa_cutoff,
     Rcpp::Nullable<arma::vec> v_et_nullable) {
-
   const int n_peaks = X_test_pos.n_cols;
 
   // 1. Vectorized scores: U = X_test_pos' * grad_weights (BLAS dgemv)
@@ -1188,9 +1166,9 @@ Rcpp::List score_test_count_batch_cpp(
     // Joint IRLS refinement for significant peaks
     if (std::sqrt(T_stat) > refine_cutoff) {
       arma::vec bn = beta_null;
-      beta_hat = refine_beta_joint_ztnb(
-        beta_hat, X_test_pos.col(k), Y_pos,
-        eta_null_pos, X_null_pos, w_pos, theta, bn);
+      beta_hat =
+          refine_beta_joint_ztnb(beta_hat, X_test_pos.col(k), Y_pos,
+                                 eta_null_pos, X_null_pos, w_pos, theta, bn);
     }
 
     // Back-compute SE from p-value
@@ -1213,9 +1191,7 @@ Rcpp::List score_test_count_batch_cpp(
   }
 
   return Rcpp::List::create(
-    Rcpp::Named("pvalue") = pval_vec,
-    Rcpp::Named("statistic") = stat_vec,
-    Rcpp::Named("beta") = beta_hat_vec,
-    Rcpp::Named("se") = se_vec,
-    Rcpp::Named("spa_applied") = spa_vec);
+      Rcpp::Named("pvalue") = pval_vec, Rcpp::Named("statistic") = stat_vec,
+      Rcpp::Named("beta") = beta_hat_vec, Rcpp::Named("se") = se_vec,
+      Rcpp::Named("spa_applied") = spa_vec);
 }
