@@ -70,7 +70,7 @@ summary(model)
 
 ## Score test
 
-The **score test** evaluates significance at the null model — it does not fit the full count model, making it both faster (~2x with cached nulls) and robust to model misspecification. The score test is available for all count distributions (negbin, poisson, geometric).
+The **score test** evaluates significance at the null model — it does not fit the full count model, making it both faster and robust to model misspecification. The score test is available for all count distributions (negbin, poisson, geometric).
 
 The count component uses the **observed information** (analytical negative Hessian) instead of the expected Fisher information. This makes the score test robust to distributional misspecification — it matches Wald test calibration even when the NB model is not perfectly specified (e.g., ambient RNA contamination, non-NB count distributions). The zero component uses the expected FIM, which is identical to the observed information for the binomial/logit model (a property of canonical GLMs).
 
@@ -153,27 +153,19 @@ s$coefficients$count["peak_acc", ]  # Score test: beta, SE, z, p-value
 s$coefficients$zero["peak_acc", ]   # Score test: beta, SE, z, p-value
 ```
 
-For high-throughput testing (many peaks per gene), both null models can be fitted once and reused:
+### Batch scanning with `hurdle_scan()`
+
+For testing many peaks against the same gene, `hurdle_scan()` fits the null models once and scans all peaks efficiently. The design matrix includes all peaks as columns, but each peak is tested marginally (one at a time) against a null model containing only the covariates:
 
 ```r
-# Fit nulls once per gene (covariates only, no peak_acc)
-X_null <- model.matrix(~ pct_counts_mito, data = df)
-Z_null <- model.matrix(~ log_total_counts + pct_counts_mito, data = df)
-null_fit_count <- fit_null_count(X_null, y, offsetx = offsetx, dist = "negbin")
-null_fit_zero <- fit_null_zero(Z_null, y)
+# Build a matrix with covariates + all peaks to test
+X <- model.matrix(~ pct_counts_mito + peak1 + peak2 + peak3, data = df)
+Z <- model.matrix(~ log_total_counts + pct_counts_mito + peak1 + peak2 + peak3, data = df)
 
-# Test each peak against cached nulls
-for (peak in peaks) {
-  X <- cbind(X_null, df[[peak]])
-  colnames(X)[ncol(X)] <- peak
-  Z <- cbind(Z_null, df[[peak]])
-  colnames(Z)[ncol(Z)] <- peak
-  model <- fast_negbin_hurdle(X, y, Z = Z, offsetx = offsetx,
-                               score_test = peak,
-                               null_fit_count = null_fit_count,
-                               null_fit_zero = null_fit_zero)
-  # Extract results from summary(model)
-}
+results <- hurdle_scan(X, y, peaks = c("peak1", "peak2", "peak3"),
+                       Z = Z, offsetx = offsetx)
+# Returns data.frame: peak, nlog10p_count, beta_count, se_count, stat_count,
+#                      nlog10p_zero, beta_zero, se_zero, stat_zero
 ```
 
 ## Benchmark Results
@@ -203,7 +195,11 @@ Average speedup of `fasthurdle` compared to `pscl::hurdle`:
   - Count distributions: Poisson, Negative Binomial, Geometric
   - Zero hurdle distributions: Binomial, Poisson, Negative Binomial, Geometric
 - Compatible API with `pscl::hurdle`
-- Improved performance through C++ implementations
+- Score test with observed information for robust inference
+- `hurdle_scan()` for high-throughput peak-gene link analysis
+- Joint 2-df chi-squared test and ACAT stage-wise mode classification
+- Saddlepoint approximation (SPA) for accurate tail p-values
+- C++ backend via Rcpp/RcppArmadillo
 
 ## Acknowledgements
 
@@ -213,9 +209,10 @@ The use of hurdle models for peak-gene link analysis in single-nucleus multiome 
 
 ## Changelog
 
-### v1.2.0 (2026-03-25)
+### v1.2.0 (2026-04-06)
 
-- **New feature**: Score test with observed information for count and zero components. See [Score test](#score-test-recommended) section above.
+- **New feature**: Score test with observed information for count and zero components.
+- **New feature**: `hurdle_scan()` for batch score-testing many peaks against the same gene.
 - **New feature**: Joint 2-df chi-squared score test (`joint_score_test()`) for omnibus peak-gene testing.
 
 ### v1.1.1 (2026-03-09)

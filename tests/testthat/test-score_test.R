@@ -555,8 +555,10 @@ test_that("joint_score_test produces valid output from chi-squared statistics", 
 test_that("joint_score_test errors on mixed or missing inputs", {
   expect_error(joint_score_test(), "provide either")
   expect_error(
-    joint_score_test(p_zero = c(0.1), p_count = c(0.2),
-                     chisq_zero = c(1), chisq_count = c(2)),
+    joint_score_test(
+      p_zero = c(0.1), p_count = c(0.2),
+      chisq_zero = c(1), chisq_count = c(2)
+    ),
     "not both"
   )
 })
@@ -573,8 +575,10 @@ test_that("joint_score_test is more powerful than individual tests for dual sign
 test_that("joint_score_test mode classification is correct", {
   chisq_zero <- c(20, 20, 0.1, 50)
   chisq_count <- c(20, 0.1, 20, 50)
-  res <- joint_score_test(chisq_zero = chisq_zero, chisq_count = chisq_count,
-                          alpha = 0.05)
+  res <- joint_score_test(
+    chisq_zero = chisq_zero, chisq_count = chisq_count,
+    alpha = 0.05
+  )
   expect_true(all(res$selected))
   expect_equal(as.character(res$mode[1]), "dual")
   expect_equal(as.character(res$mode[2]), "switch")
@@ -584,21 +588,27 @@ test_that("joint_score_test mode classification is correct", {
 
 test_that("joint_score_test handles NA values", {
   # NA in chi-squared path
-  res <- joint_score_test(chisq_zero = c(10, NA, 1),
-                          chisq_count = c(10, 10, NA))
+  res <- joint_score_test(
+    chisq_zero = c(10, NA, 1),
+    chisq_count = c(10, 10, NA)
+  )
   expect_true(is.na(res$p_joint[2]))
   expect_true(is.na(res$p_joint[3]))
   expect_true(!is.na(res$p_joint[1]))
   # NA in p-value path
-  res2 <- joint_score_test(p_zero = c(0.001, NA, 0.5),
-                           p_count = c(0.001, 0.5, NA))
+  res2 <- joint_score_test(
+    p_zero = c(0.001, NA, 0.5),
+    p_count = c(0.001, 0.5, NA)
+  )
   expect_true(is.na(res2$p_joint[2]))
   expect_true(is.na(res2$p_joint[3]))
 })
 
 test_that("joint_score_test works with very large statistics", {
-  res <- joint_score_test(chisq_zero = c(100, 200),
-                          chisq_count = c(150, 50))
+  res <- joint_score_test(
+    chisq_zero = c(100, 200),
+    chisq_count = c(150, 50)
+  )
   expect_true(all(res$chisq_joint > 0))
   expect_true(all(res$p_joint >= 0))
   expect_true(all(res$selected))
