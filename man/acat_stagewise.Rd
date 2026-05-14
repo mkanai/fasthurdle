@@ -4,12 +4,7 @@
 \alias{acat_stagewise}
 \title{ACAT stage-wise testing for hurdle model FDR control}
 \usage{
-acat_stagewise(
-  p_zero,
-  p_count,
-  alpha = 0.05,
-  pi0.method = c("smoother", "bootstrap")
-)
+acat_stagewise(p_zero, p_count, alpha = 0.05)
 }
 \arguments{
 \item{p_zero}{Numeric vector of zero-inflation model p-values.}
@@ -18,28 +13,24 @@ acat_stagewise(
 
 \item{alpha}{Significance threshold for both screening and confirmation
 (default: 0.05).}
-
-\item{pi0.method}{Method for estimating the proportion of true nulls in
-\code{\link[qvalue]{qvalue}}. Either \code{"smoother"} (default) or
-\code{"bootstrap"}.}
 }
 \value{
 A data.frame with columns:
   \item{p_omnibus}{CCT-combined omnibus p-value.}
-  \item{q_omnibus}{qvalue-based FDR for the omnibus test.}
+  \item{q_omnibus}{Benjamini-Hochberg adjusted p-value for the omnibus test.}
   \item{selected}{Logical; TRUE if q_omnibus < alpha.}
   \item{p_adj_zero}{Holm-adjusted zero-model p-value (NA if not selected).}
   \item{p_adj_count}{Holm-adjusted count-model p-value (NA if not selected).}
   \item{sig_zero}{Logical; zero component significant after Holm correction.}
   \item{sig_count}{Logical; count component significant after Holm correction.}
-  \item{mechanism}{Factor classifying the link as "dual", "switch",
+  \item{mode}{Factor classifying the regulatory mode as "dual", "switch",
     "rheostat", "omnibus_only", or "not_significant".}
-  \item{sig}{Logical; TRUE if mechanism is not "not_significant".}
+  \item{sig}{Logical; TRUE if mode is not "not_significant".}
 }
 \description{
 Combines zero-inflation and count model p-values using the Cauchy
 combination test (CCT/ACAT) for omnibus screening, then applies stage-wise
-confirmation via the Holm procedure to classify the regulatory mechanism.
+confirmation via the Holm procedure to classify the regulatory mode.
 This provides overall FDR control at the screening level with family-wise
 error rate control within each selected pair.
 }
@@ -51,8 +42,4 @@ and differential transcript usage. \emph{Genome Biology}, 18, 151.
 Liu, Y., & Xie, J. (2020). Cauchy combination test: a powerful test with
 analytic p-value calculation under arbitrary dependency structures.
 \emph{Journal of the American Statistical Association}, 115(529), 393-402.
-
-Storey, J.D. & Tibshirani, R. (2003). Statistical significance for
-genome-wide experiments. \emph{Proceedings of the National Academy of
-Sciences}, 100, 9440-9445.
 }

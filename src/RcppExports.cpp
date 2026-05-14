@@ -11,6 +11,21 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// compute_ztnb_fisher_info_cpp
+arma::mat compute_ztnb_fisher_info_cpp(const arma::vec& beta, double theta, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights);
+RcppExport SEXP _fasthurdle_compute_ztnb_fisher_info_cpp(SEXP betaSEXP, SEXP thetaSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::vec& >::type beta(betaSEXP);
+    Rcpp::traits::input_parameter< double >::type theta(thetaSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type X(XSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type offsetx(offsetxSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type weights(weightsSEXP);
+    rcpp_result_gen = Rcpp::wrap(compute_ztnb_fisher_info_cpp(beta, theta, X, offsetx, weights));
+    return rcpp_result_gen;
+END_RCPP
+}
 // optim_count_poisson_cpp
 Rcpp::List optim_count_poisson_cpp(const arma::vec& start, const arma::vec& Y, const arma::mat& X, const arma::vec& offsetx, const arma::vec& weights, const std::string& method, bool hessian, int maxit, double reltol);
 RcppExport SEXP _fasthurdle_optim_count_poisson_cpp(SEXP startSEXP, SEXP YSEXP, SEXP XSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP methodSEXP, SEXP hessianSEXP, SEXP maxitSEXP, SEXP reltolSEXP) {
@@ -169,6 +184,45 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// prepare_score_cache_zero_cpp
+Rcpp::List prepare_score_cache_zero_cpp(const arma::vec& null_par, const arma::vec& Y, const arma::mat& Z_null, const arma::vec& offsetz, const arma::vec& weights);
+RcppExport SEXP _fasthurdle_prepare_score_cache_zero_cpp(SEXP null_parSEXP, SEXP YSEXP, SEXP Z_nullSEXP, SEXP offsetzSEXP, SEXP weightsSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::vec& >::type null_par(null_parSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type Y(YSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type Z_null(Z_nullSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type offsetz(offsetzSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type weights(weightsSEXP);
+    rcpp_result_gen = Rcpp::wrap(prepare_score_cache_zero_cpp(null_par, Y, Z_null, offsetz, weights));
+    return rcpp_result_gen;
+END_RCPP
+}
+// score_test_zero_cpp
+Rcpp::List score_test_zero_cpp(const arma::vec& z_test, const arma::vec& W_resid, const arma::vec& W_diag, const arma::mat& I_nn_inv, const arma::mat& Znull_W_t, const arma::vec& p_null, const arma::vec& Y, const arma::mat& Z_null, const arma::vec& offsetz, const arma::vec& weights, const arma::vec& null_par, int kz_null, bool use_spa, double spa_cutoff);
+RcppExport SEXP _fasthurdle_score_test_zero_cpp(SEXP z_testSEXP, SEXP W_residSEXP, SEXP W_diagSEXP, SEXP I_nn_invSEXP, SEXP Znull_W_tSEXP, SEXP p_nullSEXP, SEXP YSEXP, SEXP Z_nullSEXP, SEXP offsetzSEXP, SEXP weightsSEXP, SEXP null_parSEXP, SEXP kz_nullSEXP, SEXP use_spaSEXP, SEXP spa_cutoffSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::vec& >::type z_test(z_testSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type W_resid(W_residSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type W_diag(W_diagSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type I_nn_inv(I_nn_invSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type Znull_W_t(Znull_W_tSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type p_null(p_nullSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type Y(YSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type Z_null(Z_nullSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type offsetz(offsetzSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type weights(weightsSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type null_par(null_parSEXP);
+    Rcpp::traits::input_parameter< int >::type kz_null(kz_nullSEXP);
+    Rcpp::traits::input_parameter< bool >::type use_spa(use_spaSEXP);
+    Rcpp::traits::input_parameter< double >::type spa_cutoff(spa_cutoffSEXP);
+    rcpp_result_gen = Rcpp::wrap(score_test_zero_cpp(z_test, W_resid, W_diag, I_nn_inv, Znull_W_t, p_null, Y, Z_null, offsetz, weights, null_par, kz_null, use_spa, spa_cutoff));
+    return rcpp_result_gen;
+END_RCPP
+}
 // compute_negbin_hurdle_fitted_cpp
 Rcpp::List compute_negbin_hurdle_fitted_cpp(const arma::vec& coefc, const arma::vec& coefz, const arma::mat& X, const arma::mat& Z, const arma::vec& offsetx, const arma::vec& offsetz, double theta, const arma::vec& y);
 RcppExport SEXP _fasthurdle_compute_negbin_hurdle_fitted_cpp(SEXP coefcSEXP, SEXP coefzSEXP, SEXP XSEXP, SEXP ZSEXP, SEXP offsetxSEXP, SEXP offsetzSEXP, SEXP thetaSEXP, SEXP ySEXP) {
@@ -187,8 +241,89 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// prepare_score_cache_count_cpp
+Rcpp::List prepare_score_cache_count_cpp(const arma::vec& null_par, const arma::vec& Y, const arma::mat& X_null, const arma::vec& offsetx, const arma::vec& weights, const std::string& dist);
+RcppExport SEXP _fasthurdle_prepare_score_cache_count_cpp(SEXP null_parSEXP, SEXP YSEXP, SEXP X_nullSEXP, SEXP offsetxSEXP, SEXP weightsSEXP, SEXP distSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::vec& >::type null_par(null_parSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type Y(YSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type X_null(X_nullSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type offsetx(offsetxSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type weights(weightsSEXP);
+    Rcpp::traits::input_parameter< const std::string& >::type dist(distSEXP);
+    rcpp_result_gen = Rcpp::wrap(prepare_score_cache_count_cpp(null_par, Y, X_null, offsetx, weights, dist));
+    return rcpp_result_gen;
+END_RCPP
+}
+// score_test_count_cpp
+Rcpp::List score_test_count_cpp(const arma::vec& x_test, const arma::uvec& Y1, const arma::vec& grad_weights, const arma::vec& v_ee, const arma::vec& Y_pos, const arma::mat& I_nn_inv, const arma::mat& I_nn_beta_inv, bool beta_inv_ok, const arma::mat& Xnull_vee_t, const arma::mat& X_null_pos, const arma::vec& w_pos, double theta, const arma::vec& beta_null, const arma::vec& eta_null_pos, const arma::vec& mu_pos, const arma::vec& p0_pos, const arma::vec& log_p1_pos, int kx_null, bool has_theta, bool use_spa, double spa_cutoff, Rcpp::Nullable<arma::vec> v_et_nullable);
+RcppExport SEXP _fasthurdle_score_test_count_cpp(SEXP x_testSEXP, SEXP Y1SEXP, SEXP grad_weightsSEXP, SEXP v_eeSEXP, SEXP Y_posSEXP, SEXP I_nn_invSEXP, SEXP I_nn_beta_invSEXP, SEXP beta_inv_okSEXP, SEXP Xnull_vee_tSEXP, SEXP X_null_posSEXP, SEXP w_posSEXP, SEXP thetaSEXP, SEXP beta_nullSEXP, SEXP eta_null_posSEXP, SEXP mu_posSEXP, SEXP p0_posSEXP, SEXP log_p1_posSEXP, SEXP kx_nullSEXP, SEXP has_thetaSEXP, SEXP use_spaSEXP, SEXP spa_cutoffSEXP, SEXP v_et_nullableSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::vec& >::type x_test(x_testSEXP);
+    Rcpp::traits::input_parameter< const arma::uvec& >::type Y1(Y1SEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type grad_weights(grad_weightsSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type v_ee(v_eeSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type Y_pos(Y_posSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type I_nn_inv(I_nn_invSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type I_nn_beta_inv(I_nn_beta_invSEXP);
+    Rcpp::traits::input_parameter< bool >::type beta_inv_ok(beta_inv_okSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type Xnull_vee_t(Xnull_vee_tSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type X_null_pos(X_null_posSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type w_pos(w_posSEXP);
+    Rcpp::traits::input_parameter< double >::type theta(thetaSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type beta_null(beta_nullSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type eta_null_pos(eta_null_posSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type mu_pos(mu_posSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type p0_pos(p0_posSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type log_p1_pos(log_p1_posSEXP);
+    Rcpp::traits::input_parameter< int >::type kx_null(kx_nullSEXP);
+    Rcpp::traits::input_parameter< bool >::type has_theta(has_thetaSEXP);
+    Rcpp::traits::input_parameter< bool >::type use_spa(use_spaSEXP);
+    Rcpp::traits::input_parameter< double >::type spa_cutoff(spa_cutoffSEXP);
+    Rcpp::traits::input_parameter< Rcpp::Nullable<arma::vec> >::type v_et_nullable(v_et_nullableSEXP);
+    rcpp_result_gen = Rcpp::wrap(score_test_count_cpp(x_test, Y1, grad_weights, v_ee, Y_pos, I_nn_inv, I_nn_beta_inv, beta_inv_ok, Xnull_vee_t, X_null_pos, w_pos, theta, beta_null, eta_null_pos, mu_pos, p0_pos, log_p1_pos, kx_null, has_theta, use_spa, spa_cutoff, v_et_nullable));
+    return rcpp_result_gen;
+END_RCPP
+}
+// score_test_count_batch_cpp
+Rcpp::List score_test_count_batch_cpp(const arma::mat& X_test_pos, const arma::uvec& Y1, const arma::vec& grad_weights, const arma::vec& v_ee, const arma::vec& Y_pos, const arma::mat& I_nn_inv, const arma::mat& I_nn_beta_inv, bool beta_inv_ok, const arma::mat& Xnull_vee_t, const arma::mat& X_null_pos, const arma::vec& w_pos, double theta, const arma::vec& beta_null, const arma::vec& eta_null_pos, const arma::vec& mu_pos, const arma::vec& p0_pos, const arma::vec& log_p1_pos, int kx_null, bool has_theta, bool use_spa, double spa_cutoff, Rcpp::Nullable<arma::vec> v_et_nullable);
+RcppExport SEXP _fasthurdle_score_test_count_batch_cpp(SEXP X_test_posSEXP, SEXP Y1SEXP, SEXP grad_weightsSEXP, SEXP v_eeSEXP, SEXP Y_posSEXP, SEXP I_nn_invSEXP, SEXP I_nn_beta_invSEXP, SEXP beta_inv_okSEXP, SEXP Xnull_vee_tSEXP, SEXP X_null_posSEXP, SEXP w_posSEXP, SEXP thetaSEXP, SEXP beta_nullSEXP, SEXP eta_null_posSEXP, SEXP mu_posSEXP, SEXP p0_posSEXP, SEXP log_p1_posSEXP, SEXP kx_nullSEXP, SEXP has_thetaSEXP, SEXP use_spaSEXP, SEXP spa_cutoffSEXP, SEXP v_et_nullableSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type X_test_pos(X_test_posSEXP);
+    Rcpp::traits::input_parameter< const arma::uvec& >::type Y1(Y1SEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type grad_weights(grad_weightsSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type v_ee(v_eeSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type Y_pos(Y_posSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type I_nn_inv(I_nn_invSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type I_nn_beta_inv(I_nn_beta_invSEXP);
+    Rcpp::traits::input_parameter< bool >::type beta_inv_ok(beta_inv_okSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type Xnull_vee_t(Xnull_vee_tSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type X_null_pos(X_null_posSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type w_pos(w_posSEXP);
+    Rcpp::traits::input_parameter< double >::type theta(thetaSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type beta_null(beta_nullSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type eta_null_pos(eta_null_posSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type mu_pos(mu_posSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type p0_pos(p0_posSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type log_p1_pos(log_p1_posSEXP);
+    Rcpp::traits::input_parameter< int >::type kx_null(kx_nullSEXP);
+    Rcpp::traits::input_parameter< bool >::type has_theta(has_thetaSEXP);
+    Rcpp::traits::input_parameter< bool >::type use_spa(use_spaSEXP);
+    Rcpp::traits::input_parameter< double >::type spa_cutoff(spa_cutoffSEXP);
+    Rcpp::traits::input_parameter< Rcpp::Nullable<arma::vec> >::type v_et_nullable(v_et_nullableSEXP);
+    rcpp_result_gen = Rcpp::wrap(score_test_count_batch_cpp(X_test_pos, Y1, grad_weights, v_ee, Y_pos, I_nn_inv, I_nn_beta_inv, beta_inv_ok, Xnull_vee_t, X_null_pos, w_pos, theta, beta_null, eta_null_pos, mu_pos, p0_pos, log_p1_pos, kx_null, has_theta, use_spa, spa_cutoff, v_et_nullable));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_fasthurdle_compute_ztnb_fisher_info_cpp", (DL_FUNC) &_fasthurdle_compute_ztnb_fisher_info_cpp, 5},
     {"_fasthurdle_optim_count_poisson_cpp", (DL_FUNC) &_fasthurdle_optim_count_poisson_cpp, 9},
     {"_fasthurdle_optim_count_negbin_cpp", (DL_FUNC) &_fasthurdle_optim_count_negbin_cpp, 9},
     {"_fasthurdle_optim_count_geom_cpp", (DL_FUNC) &_fasthurdle_optim_count_geom_cpp, 9},
@@ -197,7 +332,12 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fasthurdle_optim_zero_geom_cpp", (DL_FUNC) &_fasthurdle_optim_zero_geom_cpp, 9},
     {"_fasthurdle_optim_zero_binom_cpp", (DL_FUNC) &_fasthurdle_optim_zero_binom_cpp, 10},
     {"_fasthurdle_optim_joint_cpp", (DL_FUNC) &_fasthurdle_optim_joint_cpp, 14},
+    {"_fasthurdle_prepare_score_cache_zero_cpp", (DL_FUNC) &_fasthurdle_prepare_score_cache_zero_cpp, 5},
+    {"_fasthurdle_score_test_zero_cpp", (DL_FUNC) &_fasthurdle_score_test_zero_cpp, 14},
     {"_fasthurdle_compute_negbin_hurdle_fitted_cpp", (DL_FUNC) &_fasthurdle_compute_negbin_hurdle_fitted_cpp, 8},
+    {"_fasthurdle_prepare_score_cache_count_cpp", (DL_FUNC) &_fasthurdle_prepare_score_cache_count_cpp, 6},
+    {"_fasthurdle_score_test_count_cpp", (DL_FUNC) &_fasthurdle_score_test_count_cpp, 22},
+    {"_fasthurdle_score_test_count_batch_cpp", (DL_FUNC) &_fasthurdle_score_test_count_batch_cpp, 22},
     {NULL, NULL, 0}
 };
 

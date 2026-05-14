@@ -121,7 +121,7 @@ jiang_doerge_fdr <- function(p_stage1, p_stage2, alpha1 = 0.1, alpha2 = 0.05) {
 #'
 #' Combines zero-inflation and count model p-values using the Cauchy
 #' combination test (CCT/ACAT) for omnibus screening, then applies stage-wise
-#' confirmation via the Holm procedure to classify the regulatory mechanism.
+#' confirmation via the Holm procedure to classify the regulatory mode.
 #' This provides overall FDR control at the screening level with family-wise
 #' error rate control within each selected pair.
 #'
@@ -129,20 +129,17 @@ jiang_doerge_fdr <- function(p_stage1, p_stage2, alpha1 = 0.1, alpha2 = 0.05) {
 #' @param p_count Numeric vector of count model p-values.
 #' @param alpha Significance threshold for both screening and confirmation
 #'   (default: 0.05).
-#' @param pi0.method Method for estimating the proportion of true nulls in
-#'   \code{\link[qvalue]{qvalue}}. Either \code{"smoother"} (default) or
-#'   \code{"bootstrap"}.
 #' @return A data.frame with columns:
 #'   \item{p_omnibus}{CCT-combined omnibus p-value.}
-#'   \item{q_omnibus}{qvalue-based FDR for the omnibus test.}
+#'   \item{q_omnibus}{Benjamini-Hochberg adjusted p-value for the omnibus test.}
 #'   \item{selected}{Logical; TRUE if q_omnibus < alpha.}
 #'   \item{p_adj_zero}{Holm-adjusted zero-model p-value (NA if not selected).}
 #'   \item{p_adj_count}{Holm-adjusted count-model p-value (NA if not selected).}
 #'   \item{sig_zero}{Logical; zero component significant after Holm correction.}
 #'   \item{sig_count}{Logical; count component significant after Holm correction.}
-#'   \item{mechanism}{Factor classifying the link as "dual", "switch",
+#'   \item{mode}{Factor classifying the regulatory mode as "dual", "switch",
 #'     "rheostat", "omnibus_only", or "not_significant".}
-#'   \item{sig}{Logical; TRUE if mechanism is not "not_significant".}
+#'   \item{sig}{Logical; TRUE if mode is not "not_significant".}
 #' @references
 #' Van den Berge, K., et al. (2017). stageR: a general stage-wise method for
 #' controlling the gene-level false discovery rate in differential expression
@@ -151,30 +148,21 @@ jiang_doerge_fdr <- function(p_stage1, p_stage2, alpha1 = 0.1, alpha2 = 0.05) {
 #' Liu, Y., & Xie, J. (2020). Cauchy combination test: a powerful test with
 #' analytic p-value calculation under arbitrary dependency structures.
 #' \emph{Journal of the American Statistical Association}, 115(529), 393-402.
-#'
-#' Storey, J.D. & Tibshirani, R. (2003). Statistical significance for
-#' genome-wide experiments. \emph{Proceedings of the National Academy of
-#' Sciences}, 100, 9440-9445.
 #' @export
-acat_stagewise <- function(p_zero, p_count, alpha = 0.05,
-                           pi0.method = c("smoother", "bootstrap")) {
-  pi0.method <- match.arg(pi0.method)
+acat_stagewise <- function(p_zero, p_count, alpha = 0.05) {
   n <- length(p_zero)
   if (length(p_count) != n) stop("'p_zero' and 'p_count' must have the same length")
-  if (!requireNamespace("qvalue", quietly = TRUE)) {
-    stop("package 'qvalue' is required; install with: BiocManager::install(\"qvalue\")")
-  }
 
   # Screening: CCT omnibus test
   p_omnibus <- mapply(function(pz, pc) {
     if (is.na(pz) || is.na(pc)) NA_real_ else CCT(c(pz, pc))
   }, p_zero, p_count)
 
-  # FDR control via qvalue with bootstrap pi0 estimation
+  # FDR control via Benjamini-Hochberg
   q_omnibus <- rep(NA_real_, n)
   ok <- !is.na(p_omnibus)
   if (sum(ok) > 1) {
-    q_omnibus[ok] <- qvalue::qvalue(p_omnibus[ok], pi0.method = pi0.method)$qvalues
+    q_omnibus[ok] <- stats::p.adjust(p_omnibus[ok], method = "BH")
   }
 
   selected <- !is.na(q_omnibus) & q_omnibus < alpha
@@ -192,12 +180,12 @@ acat_stagewise <- function(p_zero, p_count, alpha = 0.05,
   sig_zero <- !is.na(p_adj_zero) & p_adj_zero < alpha
   sig_count <- !is.na(p_adj_count) & p_adj_count < alpha
 
-  mechanism <- rep("not_significant", n)
-  mechanism[selected & sig_zero & sig_count] <- "dual"
-  mechanism[selected & sig_zero & !sig_count] <- "switch"
-  mechanism[selected & !sig_zero & sig_count] <- "rheostat"
-  mechanism[selected & !sig_zero & !sig_count] <- "omnibus_only"
-  mechanism <- factor(mechanism,
+  mode <- rep("not_significant", n)
+  mode[selected & sig_zero & sig_count] <- "dual"
+  mode[selected & sig_zero & !sig_count] <- "switch"
+  mode[selected & !sig_zero & sig_count] <- "rheostat"
+  mode[selected & !sig_zero & !sig_count] <- "omnibus_only"
+  mode <- factor(mode,
     levels = c("dual", "switch", "rheostat", "omnibus_only", "not_significant")
   )
 
@@ -209,7 +197,132 @@ acat_stagewise <- function(p_zero, p_count, alpha = 0.05,
     p_adj_count = p_adj_count,
     sig_zero = sig_zero,
     sig_count = sig_count,
-    mechanism = mechanism,
-    sig = mechanism != "not_significant"
+    mode = mode,
+    sig = mode != "not_significant"
+  )
+}
+
+#' Joint 2-df score test with stage-wise mode classification
+#'
+#' Combines zero and count model score test statistics via a joint chi-squared(2)
+#' test for omnibus screening, then applies Holm step-down for mode classification.
+#' Under the factorized hurdle likelihood, the zero and count score statistics are
+#' independent, so the joint statistic is simply their sum: T_joint = T_zero + T_count.
+#'
+#' By default accepts p-values (positional arguments). Chi-squared statistics
+#' can be supplied instead via \code{chisq_zero}/\code{chisq_count}; this avoids
+#' numerical underflow for very small p-values.
+#'
+#' @param p_zero Numeric vector of zero-model p-values (default positional
+#'   input). Converted internally to chi-squared(1) statistics via
+#'   \code{qchisq(p, df = 1, lower.tail = FALSE)}.
+#' @param p_count Numeric vector of count-model p-values.
+#' @param chisq_zero Numeric vector of zero-model chi-squared statistics (1 df).
+#'   From \code{score_test_zero()$statistic} or
+#'   \code{summary()$coefficients$zero[,"z value"]^2}.
+#'   If provided, \code{p_zero}/\code{p_count} must be \code{NULL}.
+#' @param chisq_count Numeric vector of count-model chi-squared statistics (1 df).
+#'   From \code{score_test_count()$statistic} or
+#'   \code{summary()$coefficients$count[,"z value"]^2}.
+#' @param alpha Significance threshold for both screening and confirmation
+#'   (default: 0.05).
+#' @return A data.frame with columns:
+#'   \item{chisq_joint}{Joint chi-squared(2) statistic (T_zero + T_count).}
+#'   \item{p_joint}{Joint p-value from chi-squared(2) distribution.}
+#'   \item{q_joint}{Benjamini-Hochberg adjusted p-value for the joint test.}
+#'   \item{selected}{Logical; TRUE if q_joint < alpha.}
+#'   \item{p_adj_zero}{Holm-adjusted zero-model p-value (NA if not selected).}
+#'   \item{p_adj_count}{Holm-adjusted count-model p-value (NA if not selected).}
+#'   \item{sig_zero}{Logical; zero component significant after Holm correction.}
+#'   \item{sig_count}{Logical; count component significant after Holm correction.}
+#'   \item{mode}{Factor classifying the regulatory mode as "dual", "switch",
+#'     "rheostat", "omnibus_only", or "not_significant".}
+#'   \item{sig}{Logical; TRUE if mode is not "not_significant".}
+#' @references
+#' Van den Berge, K., et al. (2017). stageR: a general stage-wise method for
+#' controlling the gene-level false discovery rate in differential expression
+#' and differential transcript usage. \emph{Genome Biology}, 18, 151.
+#' @importFrom stats pchisq qchisq p.adjust
+#' @export
+joint_score_test <- function(p_zero = NULL, p_count = NULL,
+                             chisq_zero = NULL, chisq_count = NULL,
+                             alpha = 0.05) {
+  # Resolve inputs: accept p-values (default) or chi-squared stats (not both)
+  has_p <- !is.null(p_zero) && !is.null(p_count)
+  has_chisq <- !is.null(chisq_zero) && !is.null(chisq_count)
+
+  if (has_chisq && has_p) {
+    stop("provide either p_zero/p_count or chisq_zero/chisq_count, not both")
+  }
+  if (!has_chisq && !has_p) {
+    stop("provide either p_zero/p_count or chisq_zero/chisq_count")
+  }
+
+  if (has_p) {
+    n <- length(p_zero)
+    if (length(p_count) != n) {
+      stop("'p_zero' and 'p_count' must have the same length")
+    }
+    chisq_zero <- qchisq(p_zero, df = 1, lower.tail = FALSE)
+    chisq_count <- qchisq(p_count, df = 1, lower.tail = FALSE)
+  } else {
+    n <- length(chisq_zero)
+    if (length(chisq_count) != n) {
+      stop("'chisq_zero' and 'chisq_count' must have the same length")
+    }
+  }
+
+  # Joint statistic: T_zero + T_count ~ chi2(2)
+  # Valid because zero and count scores are independent under factorized hurdle
+  chisq_joint <- chisq_zero + chisq_count
+  p_joint <- ifelse(is.na(chisq_joint), NA_real_,
+    pchisq(chisq_joint, df = 2, lower.tail = FALSE)
+  )
+
+  # FDR control via Benjamini-Hochberg
+  q_joint <- rep(NA_real_, n)
+  ok <- !is.na(p_joint)
+  if (sum(ok) > 1) {
+    q_joint[ok] <- stats::p.adjust(p_joint[ok], method = "BH")
+  }
+
+  selected <- !is.na(q_joint) & q_joint < alpha
+
+  # Confirmation: Holm procedure within each selected pair
+  p_zero_comp <- pchisq(chisq_zero, df = 1, lower.tail = FALSE)
+  p_count_comp <- pchisq(chisq_count, df = 1, lower.tail = FALSE)
+
+  p_adj_zero <- rep(NA_real_, n)
+  p_adj_count <- rep(NA_real_, n)
+  idx <- which(selected)
+  for (i in idx) {
+    holm <- stats::p.adjust(c(p_zero_comp[i], p_count_comp[i]), method = "holm")
+    p_adj_zero[i] <- holm[1]
+    p_adj_count[i] <- holm[2]
+  }
+
+  sig_zero <- !is.na(p_adj_zero) & p_adj_zero < alpha
+  sig_count <- !is.na(p_adj_count) & p_adj_count < alpha
+
+  mode <- rep("not_significant", n)
+  mode[selected & sig_zero & sig_count] <- "dual"
+  mode[selected & sig_zero & !sig_count] <- "switch"
+  mode[selected & !sig_zero & sig_count] <- "rheostat"
+  mode[selected & !sig_zero & !sig_count] <- "omnibus_only"
+  mode <- factor(mode,
+    levels = c("dual", "switch", "rheostat", "omnibus_only", "not_significant")
+  )
+
+  data.frame(
+    chisq_joint = chisq_joint,
+    p_joint = p_joint,
+    q_joint = q_joint,
+    selected = selected,
+    p_adj_zero = p_adj_zero,
+    p_adj_count = p_adj_count,
+    sig_zero = sig_zero,
+    sig_count = sig_count,
+    mode = mode,
+    sig = mode != "not_significant"
   )
 }
