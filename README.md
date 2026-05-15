@@ -240,6 +240,10 @@ The use of hurdle models for peak-gene link analysis in single-nucleus multiome 
 
 GPL-2
 
+## Citation
+
+Kanai, M. et al. [Population-scale multiome immune cell atlas reveals complex disease drivers](https://doi.org/10.1101/2025.11.25.25340489). medRxiv (2025)
+
 ## Contact
 
 Masahiro Kanai (<mkanai@broadinstitute.org>)
