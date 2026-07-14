@@ -1,0 +1,3 @@
+"config","n","n_peaks","n_cov","zero_frac","pscl_per_peak_s","pscl_total_s","fast_wald_per_peak_s","fast_wald_total_s","fast_score_per_peak_s","fast_score_total_s","scan_total_s","speedup_scan_vs_pscl","top_peak"
+"small",5000,200,5,0.8564,0.091,18.2,0.016,3.2,0.0150000000000001,3.00000000000002,0.104,175,"peak1"
+"large",5e+05,500,20,0.850024,31.349,15674.5,5.711,2855.5,4.315,2157.5,86.962,180.245394540144,"peak1"

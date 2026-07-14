@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Score test performance benchmark: count and zero components
-# Usage: Rscript inst/benchmark/bench_score_test.R
+# Usage: Rscript benchmark/bench_score_test.R
 
 library(fasthurdle)
 library(bench)

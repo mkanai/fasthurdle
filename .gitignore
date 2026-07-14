@@ -2,6 +2,7 @@
 .vscode
 .claude
 .serena
+.remember
 
 .Rproj.user
 .Rhistory
@@ -10,3 +11,13 @@
 src/*.o
 src/*.so
 src/*.dll
+
+# Benchmark outputs. The readme_*.csv files backing the README tables are
+# force-added; everything else here is regenerable.
+Rplots.pdf
+benchmark/benchmark_logs/
+benchmark/comparison_results/
+benchmark/benchmark_results/*
+!benchmark/benchmark_results/readme_*.csv
+!benchmark/benchmark_results/scan_scale_*.csv
+__pycache__/
