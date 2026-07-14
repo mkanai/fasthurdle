@@ -70,16 +70,16 @@ summary(model)
 
 ## Score test
 
-The **score test** evaluates significance at the null model — it does not fit the full count model, making it both faster and robust to model misspecification. The score test is available for all count distributions (negbin, poisson, geometric).
+The **score test** evaluates significance at the null model: it does not fit the full count model, making it both faster and robust to model misspecification. The score test is available for all count distributions (negbin, poisson, geometric).
 
-The count component uses the **observed information** (analytical negative Hessian) instead of the expected Fisher information. This makes the score test robust to distributional misspecification — it matches Wald test calibration even when the NB model is not perfectly specified (e.g., ambient RNA contamination, non-NB count distributions). The zero component uses the expected FIM, which is identical to the observed information for the binomial/logit model (a property of canonical GLMs).
+The count component uses the **observed information** (analytical negative Hessian) instead of the expected Fisher information. This makes the score test robust to distributional misspecification: it matches Wald test calibration even when the NB model is not perfectly specified (e.g., ambient RNA contamination, non-NB count distributions). The zero component uses the expected FIM, which is identical to the observed information for the binomial/logit model (a property of canonical GLMs).
 
 For significant tests (|z| > 2), beta is refined via a short BFGS optimization, giving accuracy within ~3% of the full MLE. The `summary()` output format is unchanged.
 
 **SPA** (saddlepoint approximation) is available via `spa_cutoff = 2` for improved tail p-value accuracy, primarily useful for sparse genes at small sample sizes (n < 50K).
 
 ```r
-# Score test for x — just add score_test
+# Score test for x: just add score_test
 model <- fasthurdle(y ~ x | z, data = df, dist = "negbin", zero.dist = "binomial",
                     score_test = "x")
 summary(model)  # same format, score-test p-value for x
@@ -170,24 +170,46 @@ results <- hurdle_scan(X, y, peaks = c("peak1", "peak2", "peak3"),
 
 ## Benchmark Results
 
-Average speedup of `fasthurdle` compared to `pscl::hurdle`:
+### Model fitting vs `pscl::hurdle`
 
-| Count Model | Zero Hurdle | Speedup Factor |
-|------------|------------|---------------|
-| geometric  | binomial   | 2.2x          |
-| geometric  | geometric  | 2.3x          |
-| geometric  | negbin     | 5.1x          |
-| geometric  | poisson    | 2.9x          |
-| negbin     | binomial   | 13x           |
-| negbin     | geometric  | 12.1x         |
-| negbin     | negbin     | 11x           |
-| negbin     | poisson    | 11.3x         |
-| poisson    | binomial   | 3.4x          |
-| poisson    | geometric  | 3.1x          |
-| poisson    | negbin     | 5.8x          |
-| poisson    | poisson    | 3.7x          |
+Speedup of `fasthurdle()` over `pscl::hurdle()` on the same data, by sample size:
 
-*Note: Benchmarks run with sample sizes of 1,000, 10,000, and 100,000. Speedup factor is the ratio of pscl execution time to fasthurdle execution time.*
+| Count Model | Zero Hurdle | n=1,000 | n=10,000 | n=100,000 |
+|------------|------------|---------|----------|-----------|
+| geometric  | binomial   | 2.2x    | 3.1x     | 3.4x      |
+| geometric  | geometric  | 2.4x    | 3.4x     | 3.6x      |
+| geometric  | negbin     | 5.6x    | 6.5x     | 5.3x      |
+| geometric  | poisson    | 3.1x    | 4.7x     | 4.3x      |
+| negbin     | binomial   | 3.2x    | 4.9x     | 4.3x      |
+| negbin     | geometric  | 3.2x    | 4.9x     | 4.5x      |
+| negbin     | negbin     | 6.4x    | 6.6x     | 5.8x      |
+| negbin     | poisson    | 3.9x    | 5.0x     | 5.1x      |
+| poisson    | binomial   | 2.5x    | 4.0x     | 4.2x      |
+| poisson    | geometric  | 2.7x    | 3.9x     | 4.3x      |
+| poisson    | negbin     | 6.0x    | 6.6x     | 5.3x      |
+| poisson    | poisson    | 3.4x    | 4.8x     | 4.9x      |
+
+Speedup is mildly higher on sparser data: across the grid at n=100,000 the median is 4.0x at 40% zeros, 4.3x at 80%, and 4.8x at 95%.
+
+### Peak-gene scan
+
+Scanning all candidate peaks against one gene, with an NB count model and a binomial zero hurdle at 85% zeros. This is the workload `hurdle_scan()` exists for: the null models are fit once per gene and every peak is scored against them, rather than refitting the full model for each peak (which is the only option in `pscl`).
+
+Total time per gene:
+
+| Method | 5,000 cells, 200 peaks | 500,000 cells, 500 peaks |
+|--------|-----------------------|--------------------------|
+| `pscl::hurdle()`, refit per peak | 18s * | 4.3h * |
+| `fast_negbin_hurdle()`, refit per peak (Wald) | 3.2s * | 46min * |
+| `fast_negbin_hurdle()`, refit per peak (score test) | 2.8s * | 35min * |
+| `hurdle_scan()`, shared null + score test | **0.10s** | **85s** |
+| | **175x** | **180x** |
+
+The larger configuration (~20 covariates) is representative of a cis-window scan on a single-cell multiome dataset. Note that the advantage of amortizing the null fit narrows as the individual fits get more expensive, so quoting the small-scale ratio alone would overstate it.
+
+*\* Per-peak refit totals are extrapolated: the per-peak cost is timed on a handful of peaks and multiplied by the peak count. These are independent refits over identical data, so the loop is linear (verified against a full 200-peak `pscl` run: 45.2s extrapolated vs 45.4s measured). Running the 500,000-cell `pscl` baseline in full would take over four hours. `hurdle_scan()` is timed in full in both columns.*
+
+*Benchmarks run single-threaded (`OMP_NUM_THREADS=1` set in the environment before R starts) so the speedup reflects the implementation rather than the core count; `fasthurdle` uses OpenMP and will go faster with more threads, while `pscl` is single-threaded. Note that R is often linked against a threaded BLAS, which on matrices this small is markedly slower than a single thread -- the benchmark scripts refuse to run unless `OMP_NUM_THREADS=1` is set. Data are simulated from a true hurdle process (zero-truncated NB counts). Across all 108 grid configurations, `fasthurdle` and `pscl` coefficient estimates agree to within 2e-5, so the two are solving the same problem to the same optimum. Reproduce with `benchmark/benchmark_readme.R` (grid) and `benchmark/benchmark_scan_scale.R` (scan).*
 
 ## Features
 

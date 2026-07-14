@@ -1,0 +1,41 @@
+# Benchmarking image: builds a given fasthurdle commit and runs it against pscl.
+#
+# Build from the repository root, so that the git history is part of the context:
+#   docker build -f benchmark/Dockerfile.benchmark --build-arg GIT_COMMIT=<sha> .
+#
+# benchmark/ is bind-mounted at runtime by benchmark_commits.sh, so the harness can be
+# changed without rebuilding the image.
+FROM rocker/r-ver:4.5.1
+
+# The CRAN snapshot that rocker/r-ver pins by default is older than this package's
+# dependencies (it carries fastglm 0.0.3, but DESCRIPTION needs >= 0.0.4). Pin a dated
+# Posit Package Manager snapshot instead: new enough to resolve, and fixed so that
+# benchmarks stay comparable across runs. Bump the date deliberately, not by accident.
+ENV CRAN_SNAPSHOT=https://p3m.dev/cran/__linux__/noble/2026-07-01
+RUN echo "options(repos = c(CRAN = '${CRAN_SNAPSHOT}'))" >> /usr/local/lib/R/etc/Rprofile.site
+
+# git to check out the commit under test; build-essential and gfortran to compile the
+# package (RcppArmadillo links LAPACK/BLAS via $(FLIBS)); uuid-dev because bigmemory,
+# pulled in via fastglm, links against -luuid.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    build-essential \
+    gfortran \
+    uuid-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Packages the harness itself needs. The snapshot serves Linux binaries, so no compiling.
+RUN R -q -e "install.packages(c('remotes', 'microbenchmark', 'jsonlite', 'pscl'))"
+
+WORKDIR /app
+COPY . .
+
+# The commit to benchmark
+ARG GIT_COMMIT=master
+RUN git checkout "${GIT_COMMIT}"
+
+# Imports/LinkingTo only; the Suggests (car, testthat, ...) are not needed to benchmark.
+RUN R -q -e "remotes::install_deps('.', upgrade = 'never')" \
+    && R CMD INSTALL .
+
+CMD ["Rscript", "/app/benchmark/run_benchmark.R"]
