@@ -11,6 +11,8 @@ Description: Provides fast hurdle regression models for count data using C++
 License: GPL-2
 Encoding: UTF-8
 OS_type: unix
+Depends:
+  R (>= 4.4)
 Imports:
   fastglm (>= 0.0.4),
   Rcpp (>= 1.0.14)
