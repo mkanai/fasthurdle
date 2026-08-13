@@ -4,6 +4,8 @@ A fast implementation of hurdle models using Rcpp. This package provides the sam
 
 ## Installation
 
+Requires R 4.4 or newer.
+
 ### Pre-built binaries from R-universe (recommended)
 
 Pre-built binaries are available from [R-universe](https://mkanai.r-universe.dev/fasthurdle), which does not require a C++ compiler or Fortran toolchain:
