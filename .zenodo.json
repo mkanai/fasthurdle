@@ -1,0 +1,22 @@
+{
+  "upload_type": "software",
+  "title": "fasthurdle: Fast Implementation of Hurdle Models",
+  "description": "Fast hurdle regression models for count data implemented in C++ via Rcpp, for peak-gene link analysis in large single-nucleus multiome datasets.",
+  "creators": [
+    {
+      "name": "Kanai, Masahiro",
+      "orcid": "0000-0001-5165-4408",
+      "affiliation": "Massachusetts General Hospital & Broad Institute of MIT and Harvard"
+    }
+  ],
+  "license": "gpl-2.0",
+  "access_right": "open",
+  "related_identifiers": [
+    {
+      "identifier": "10.1101/2025.11.25.25340489",
+      "relation": "isDescribedBy",
+      "resource_type": "publication-preprint",
+      "scheme": "doi"
+    }
+  ]
+}
