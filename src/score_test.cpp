@@ -37,12 +37,12 @@ struct ZtnbCgfObsCache {
 };
 
 // Build per-observation cache for closed-form CGF.
-std::vector<ZtnbCgfObsCache> build_cgf_cache(const arma::vec &beta,
+std::vector<ZtnbCgfObsCache> build_cgf_cache(const arma::vec& beta,
                                              double theta,
-                                             const arma::mat &X_pos,
-                                             const arma::vec &offset_pos,
-                                             const arma::vec &w_pos,
-                                             const arma::vec &g_tilde_pos) {
+                                             const arma::mat& X_pos,
+                                             const arma::vec& offset_pos,
+                                             const arma::vec& w_pos,
+                                             const arma::vec& g_tilde_pos) {
   int n_pos = X_pos.n_rows;
   double log_theta = std::log(theta);
   std::vector<ZtnbCgfObsCache> cache;
@@ -88,9 +88,9 @@ std::vector<ZtnbCgfObsCache> build_cgf_cache(const arma::vec &beta,
 // Phase 4: Build CGF cache from pre-computed mu/p0/log_p1 (avoids recomputing
 // eta/mu/p0/r that were already computed in the fused score+Hessian function).
 std::vector<ZtnbCgfObsCache> build_cgf_cache_from_intermediates(
-    double theta, const arma::vec &mu_pos, const arma::vec &p0_pos,
-    const arma::vec &log_p1_pos, const arma::vec &w_pos,
-    const arma::vec &g_tilde_pos) {
+    double theta, const arma::vec& mu_pos, const arma::vec& p0_pos,
+    const arma::vec& log_p1_pos, const arma::vec& w_pos,
+    const arma::vec& g_tilde_pos) {
   int n_pos = mu_pos.n_elem;
   std::vector<ZtnbCgfObsCache> cache;
   cache.reserve(n_pos);
@@ -137,10 +137,10 @@ static const ZtnbCgfResult CGF_FAILURE = {
     std::numeric_limits<double>::quiet_NaN()};
 
 ZtnbCgfResult compute_ztnb_cgf_cached(
-    double t, double theta, const std::vector<ZtnbCgfObsCache> &cache) {
+    double t, double theta, const std::vector<ZtnbCgfObsCache>& cache) {
   ZtnbCgfResult result = {0.0, 0.0, 0.0};
 
-  for (const auto &obs : cache) {
+  for (const auto& obs : cache) {
     double lambda = obs.alpha * obs.gi * t;
 
     // Check MGF domain: need D > 0, i.e., lambda < log(1 + theta/mu)
@@ -210,7 +210,7 @@ struct SaddlepointResult {
 };
 
 SaddlepointResult find_saddlepoint(double q, double theta,
-                                   const std::vector<ZtnbCgfObsCache> &cache,
+                                   const std::vector<ZtnbCgfObsCache>& cache,
                                    double tol = 1e-8, int maxiter = 100) {
   SaddlepointResult res = {0.0, false};
   double t = 0.0;
@@ -259,7 +259,7 @@ SaddlepointResult find_saddlepoint(double q, double theta,
 
 // Compute SPA p-value using Lugannani-Rice formula (one-sided tail prob)
 double spa_pvalue_one_tail(double zeta, double q, double theta,
-                           const std::vector<ZtnbCgfObsCache> &cache) {
+                           const std::vector<ZtnbCgfObsCache>& cache) {
   auto cgf = compute_ztnb_cgf_cached(zeta, theta, cache);
 
   double temp1 = zeta * q - cgf.K;
@@ -286,7 +286,7 @@ double spa_pvalue_one_tail(double zeta, double q, double theta,
 // Full two-sided SPA p-value. Falls back to pval_nospa on failure.
 // Takes pre-built cache; build it once with build_cgf_cache() before calling.
 double spa_pvalue_twosided(double q, double pval_nospa, double theta,
-                           const std::vector<ZtnbCgfObsCache> &cache,
+                           const std::vector<ZtnbCgfObsCache>& cache,
                            double tol = 1e-8) {
   auto sp1 = find_saddlepoint(q, theta, cache, tol);
   auto sp2 = find_saddlepoint(-q, theta, cache, tol);
@@ -324,9 +324,9 @@ struct BinomCgfResult {
 };
 
 BinomCgfResult compute_binom_cgf(double t,
-                                 const std::vector<BinomCgfObsCache> &cache) {
+                                 const std::vector<BinomCgfObsCache>& cache) {
   BinomCgfResult result = {0.0, 0.0, 0.0};
-  for (const auto &obs : cache) {
+  for (const auto& obs : cache) {
     double gt = obs.gi * t;
     double egt = std::exp(gt);
     double denom = 1.0 - obs.pi + obs.pi * egt;
@@ -347,7 +347,7 @@ BinomCgfResult compute_binom_cgf(double t,
 
 // Binomial saddlepoint solver (same Newton + bisection as count)
 SaddlepointResult find_saddlepoint_binom(
-    double q, const std::vector<BinomCgfObsCache> &cache, double tol = 1e-8,
+    double q, const std::vector<BinomCgfObsCache>& cache, double tol = 1e-8,
     int maxiter = 100) {
   SaddlepointResult res = {0.0, false};
   double t = 0.0;
@@ -394,7 +394,7 @@ SaddlepointResult find_saddlepoint_binom(
 }
 
 double spa_pvalue_one_tail_binom(double zeta, double q,
-                                 const std::vector<BinomCgfObsCache> &cache) {
+                                 const std::vector<BinomCgfObsCache>& cache) {
   auto cgf = compute_binom_cgf(zeta, cache);
   double temp1 = zeta * q - cgf.K;
   if (!std::isfinite(cgf.K) || !std::isfinite(cgf.K2) || temp1 < 0 ||
@@ -414,7 +414,7 @@ double spa_pvalue_one_tail_binom(double zeta, double q,
 }
 
 double spa_pvalue_twosided_binom(double q, double pval_nospa,
-                                 const std::vector<BinomCgfObsCache> &cache,
+                                 const std::vector<BinomCgfObsCache>& cache,
                                  double tol = 1e-8) {
   auto sp1 = find_saddlepoint_binom(q, cache, tol);
   auto sp2 = find_saddlepoint_binom(-q, cache, tol);
@@ -432,11 +432,11 @@ double spa_pvalue_twosided_binom(double q, double pval_nospa,
 // ==========================================================================
 
 // [[Rcpp::export]]
-Rcpp::List prepare_score_cache_zero_cpp(const arma::vec &null_par,
-                                        const arma::vec &Y,
-                                        const arma::mat &Z_null,
-                                        const arma::vec &offsetz,
-                                        const arma::vec &weights) {
+Rcpp::List prepare_score_cache_zero_cpp(const arma::vec& null_par,
+                                        const arma::vec& Y,
+                                        const arma::mat& Z_null,
+                                        const arma::vec& offsetz,
+                                        const arma::vec& weights) {
   int kz_null = Z_null.n_cols;
   int n = Y.n_elem;
 
@@ -483,11 +483,11 @@ Rcpp::List prepare_score_cache_zero_cpp(const arma::vec &null_par,
 // the Schur solve updates (beta_null, beta_test) in fixed-effect space.
 // Same 3-step pattern as refine_beta_joint_ztnb.
 static double refine_beta_joint_logistic(
-    double beta_init, const arma::vec &z_test, const arma::vec &y_bin,
-    const arma::vec &eta_null,  // full null eta (Z*beta + offset [+ b_j])
-    const arma::mat &Z_null,    // n x kz
-    const arma::vec &weights,   // prior weights
-    arma::vec &beta_null,       // in/out: null fixed effects
+    double beta_init, const arma::vec& z_test, const arma::vec& y_bin,
+    const arma::vec& eta_null,  // full null eta (Z*beta + offset [+ b_j])
+    const arma::mat& Z_null,    // n x kz
+    const arma::vec& weights,   // prior weights
+    arma::vec& beta_null,       // in/out: null fixed effects
     int max_iter = 3) {
   const int n = z_test.n_elem;
   const int kz = Z_null.n_cols;
@@ -541,17 +541,17 @@ static double refine_beta_joint_logistic(
 // Per-peak zero score test
 // [[Rcpp::export]]
 Rcpp::List score_test_zero_cpp(
-    const arma::vec &z_test,     // n
-    const arma::vec &W_resid,    // n (cached: w * (y - p))
-    const arma::vec &W_diag,     // n (cached: w * p * (1-p))
-    const arma::mat &I_nn_inv,   // kz x kz
-    const arma::mat &Znull_W_t,  // kz x n
-    const arma::vec &p_null,     // n (for SPA)
-    const arma::vec &Y,          // n (for beta refinement)
-    const arma::mat &Z_null,     // n x kz (for SPA projection + refinement)
-    const arma::vec &offsetz,    // n
-    const arma::vec &weights,    // n
-    const arma::vec &null_par,   // kz (for beta refinement)
+    const arma::vec& z_test,     // n
+    const arma::vec& W_resid,    // n (cached: w * (y - p))
+    const arma::vec& W_diag,     // n (cached: w * p * (1-p))
+    const arma::mat& I_nn_inv,   // kz x kz
+    const arma::mat& Znull_W_t,  // kz x n
+    const arma::vec& p_null,     // n (for SPA)
+    const arma::vec& Y,          // n (for beta refinement)
+    const arma::mat& Z_null,     // n x kz (for SPA projection + refinement)
+    const arma::vec& offsetz,    // n
+    const arma::vec& weights,    // n
+    const arma::vec& null_par,   // kz (for beta refinement)
     int kz_null, bool use_spa = false, double spa_cutoff = 2.0) {
   // Score: U = dot(W_resid, z_test)
   double U_test = arma::dot(W_resid, z_test);
@@ -640,9 +640,9 @@ Rcpp::List score_test_zero_cpp(
 
 // [[Rcpp::export]]
 Rcpp::List compute_negbin_hurdle_fitted_cpp(
-    const arma::vec &coefc, const arma::vec &coefz, const arma::mat &X,
-    const arma::mat &Z, const arma::vec &offsetx, const arma::vec &offsetz,
-    double theta, const arma::vec &y) {
+    const arma::vec& coefc, const arma::vec& coefz, const arma::mat& X,
+    const arma::mat& Z, const arma::vec& offsetx, const arma::vec& offsetz,
+    double theta, const arma::vec& y) {
   // Count component: mu = exp(X * coefc + offsetx)
   arma::vec mu = exp(X * coefc + offsetx);
 
@@ -672,12 +672,12 @@ Rcpp::List compute_negbin_hurdle_fitted_cpp(
 // ==========================================================================
 
 // [[Rcpp::export]]
-Rcpp::List prepare_score_cache_count_cpp(const arma::vec &null_par,
-                                         const arma::vec &Y,
-                                         const arma::mat &X_null,
-                                         const arma::vec &offsetx,
-                                         const arma::vec &weights,
-                                         const std::string &dist = "negbin") {
+Rcpp::List prepare_score_cache_count_cpp(const arma::vec& null_par,
+                                         const arma::vec& Y,
+                                         const arma::mat& X_null,
+                                         const arma::vec& offsetx,
+                                         const arma::vec& weights,
+                                         const std::string& dist = "negbin") {
   int kx_null = X_null.n_cols;
   bool has_theta = (dist == "negbin");
   double theta;
@@ -868,11 +868,11 @@ Rcpp::List prepare_score_cache_count_cpp(const arma::vec &null_par,
 // that only beta_test is extracted. 3 iterations suffice for <1% error.
 // Cost: O(n_pos * kx) per iteration (dominated by ZTNB wq, same as 1D).
 static double refine_beta_joint_ztnb(
-    double beta_init, const arma::vec &x_pos, const arma::vec &y_pos,
-    const arma::vec &eta_null_pos,  // null eta (X*beta_null + offset)
-    const arma::mat &X_null_pos,    // n_pos x kx
-    const arma::vec &w_pos, double theta,
-    arma::vec &beta_null,  // in/out: updated jointly
+    double beta_init, const arma::vec& x_pos, const arma::vec& y_pos,
+    const arma::vec& eta_null_pos,  // null eta (X*beta_null + offset)
+    const arma::mat& X_null_pos,    // n_pos x kx
+    const arma::vec& w_pos, double theta,
+    arma::vec& beta_null,  // in/out: updated jointly
     int max_iter = 3) {
   const double theta_f = std::max(theta, 0.01);
   const int n_pos = x_pos.n_elem;
@@ -969,23 +969,23 @@ static double refine_beta_joint_ztnb(
 // Cache must be prepared via prepare_score_cache_count_cpp first.
 // [[Rcpp::export]]
 Rcpp::List score_test_count_cpp(
-    const arma::vec &x_test,         // length n (full)
-    const arma::uvec &Y1,            // pos indices (0-based)
-    const arma::vec &grad_weights,   // n_pos
-    const arma::vec &v_ee,           // n_pos
-    const arma::vec &Y_pos,          // positive counts (for IRLS refinement)
-    const arma::mat &I_nn_inv,       // np_null x np_null inverse
-    const arma::mat &I_nn_beta_inv,  // beta-only FIM block inverse (for SPA)
+    const arma::vec& x_test,         // length n (full)
+    const arma::uvec& Y1,            // pos indices (0-based)
+    const arma::vec& grad_weights,   // n_pos
+    const arma::vec& v_ee,           // n_pos
+    const arma::vec& Y_pos,          // positive counts (for IRLS refinement)
+    const arma::mat& I_nn_inv,       // np_null x np_null inverse
+    const arma::mat& I_nn_beta_inv,  // beta-only FIM block inverse (for SPA)
     bool beta_inv_ok,
-    const arma::mat &Xnull_vee_t,  // kx_null x n_pos
-    const arma::mat &X_null_pos,   // n_pos x kx_null
-    const arma::vec &w_pos,        // n_pos
+    const arma::mat& Xnull_vee_t,  // kx_null x n_pos
+    const arma::mat& X_null_pos,   // n_pos x kx_null
+    const arma::vec& w_pos,        // n_pos
     double theta,
-    const arma::vec &beta_null,     // kx_null (for joint refinement)
-    const arma::vec &eta_null_pos,  // n_pos (pre-computed null eta)
-    const arma::vec &mu_pos,        // n_pos (for SPA)
-    const arma::vec &p0_pos,        // n_pos (for SPA)
-    const arma::vec &log_p1_pos,    // n_pos (for SPA)
+    const arma::vec& beta_null,     // kx_null (for joint refinement)
+    const arma::vec& eta_null_pos,  // n_pos (pre-computed null eta)
+    const arma::vec& mu_pos,        // n_pos (for SPA)
+    const arma::vec& p0_pos,        // n_pos (for SPA)
+    const arma::vec& log_p1_pos,    // n_pos (for SPA)
     int kx_null,
     bool has_theta = true,  // true for negbin (FIM includes theta), false for
                             // poisson/geometric
@@ -1082,14 +1082,14 @@ Rcpp::List score_test_count_cpp(
 
 // [[Rcpp::export]]
 Rcpp::List score_test_count_batch_cpp(
-    const arma::mat &X_test_pos, const arma::uvec &Y1,
-    const arma::vec &grad_weights, const arma::vec &v_ee,
-    const arma::vec &Y_pos, const arma::mat &I_nn_inv,
-    const arma::mat &I_nn_beta_inv, bool beta_inv_ok,
-    const arma::mat &Xnull_vee_t, const arma::mat &X_null_pos,
-    const arma::vec &w_pos, double theta, const arma::vec &beta_null,
-    const arma::vec &eta_null_pos, const arma::vec &mu_pos,
-    const arma::vec &p0_pos, const arma::vec &log_p1_pos, int kx_null,
+    const arma::mat& X_test_pos, const arma::uvec& Y1,
+    const arma::vec& grad_weights, const arma::vec& v_ee,
+    const arma::vec& Y_pos, const arma::mat& I_nn_inv,
+    const arma::mat& I_nn_beta_inv, bool beta_inv_ok,
+    const arma::mat& Xnull_vee_t, const arma::mat& X_null_pos,
+    const arma::vec& w_pos, double theta, const arma::vec& beta_null,
+    const arma::vec& eta_null_pos, const arma::vec& mu_pos,
+    const arma::vec& p0_pos, const arma::vec& log_p1_pos, int kx_null,
     bool has_theta, bool use_spa, double spa_cutoff,
     Rcpp::Nullable<arma::vec> v_et_nullable) {
   const int n_peaks = X_test_pos.n_cols;

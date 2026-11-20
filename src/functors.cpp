@@ -17,10 +17,10 @@ using namespace roptim;
 // Base class for all likelihood functors
 class LikelihoodFunctor : public Functor {
  protected:
-  const arma::vec &Y;
-  const arma::mat &X;
-  const arma::vec &offset;
-  const arma::vec &weights;
+  const arma::vec& Y;
+  const arma::mat& X;
+  const arma::vec& offset;
+  const arma::vec& weights;
 
   // Cached indicator vectors for Y=0 and Y>0
   arma::uvec Y0;
@@ -37,8 +37,8 @@ class LikelihoodFunctor : public Functor {
 
  public:
   // Standard constructor: finds Y>0, copies subsets
-  LikelihoodFunctor(const arma::vec &y, const arma::mat &x,
-                    const arma::vec &offs, const arma::vec &w)
+  LikelihoodFunctor(const arma::vec& y, const arma::mat& x,
+                    const arma::vec& offs, const arma::vec& w)
       : Y(y), X(x), offset(offs), weights(w) {
     // Pre-compute indicator vectors
     Y0 = find(Y <= 0);
@@ -61,8 +61,8 @@ class LikelihoodFunctor : public Functor {
   // Positive-only constructor: caller guarantees all Y > 0.
   // Creates zero-copy aliases for X_pos/Y_pos/etc using Armadillo's
   // auxiliary memory mode, avoiding the O(n_pos * kx) copy.
-  LikelihoodFunctor(arma::vec &y_pos, arma::mat &x_pos, arma::vec &offs_pos,
-                    arma::vec &w_pos_in, PositiveOnlyTag)
+  LikelihoodFunctor(arma::vec& y_pos, arma::mat& x_pos, arma::vec& offs_pos,
+                    arma::vec& w_pos_in, PositiveOnlyTag)
       : Y(y_pos),
         X(x_pos),
         offset(offs_pos),
@@ -76,11 +76,11 @@ class LikelihoodFunctor : public Functor {
   }
 
   // Common utility functions
-  arma::vec calculate_eta(const arma::vec &parms) const {
+  arma::vec calculate_eta(const arma::vec& parms) const {
     return X * parms + offset;
   }
 
-  arma::vec calculate_mu(const arma::vec &eta) const { return exp(eta); }
+  arma::vec calculate_mu(const arma::vec& eta) const { return exp(eta); }
 
   // Virtual destructor for proper cleanup in derived classes
   virtual ~LikelihoodFunctor() = default;
@@ -101,20 +101,20 @@ class CountPoissonFunctor : public LikelihoodFunctor {
     }
   }
 
-  CountPoissonFunctor(const arma::vec &y, const arma::mat &x,
-                      const arma::vec &offs, const arma::vec &w)
+  CountPoissonFunctor(const arma::vec& y, const arma::mat& x,
+                      const arma::vec& offs, const arma::vec& w)
       : LikelihoodFunctor(y, x, offs, w) {
     build_lgamma_cache();
   }
 
   // Positive-only constructor: zero-copy alias
-  CountPoissonFunctor(arma::vec &y_pos, arma::mat &x_pos, arma::vec &offs_pos,
-                      arma::vec &w_pos_in, PositiveOnlyTag tag)
+  CountPoissonFunctor(arma::vec& y_pos, arma::mat& x_pos, arma::vec& offs_pos,
+                      arma::vec& w_pos_in, PositiveOnlyTag tag)
       : LikelihoodFunctor(y_pos, x_pos, offs_pos, w_pos_in, tag) {
     build_lgamma_cache();
   }
 
-  double operator()(const arma::vec &parms) override {
+  double operator()(const arma::vec& parms) override {
     // If no Y>0 observations, return 0
     if (Y1.n_elem == 0) {
       return 0.0;
@@ -136,7 +136,7 @@ class CountPoissonFunctor : public LikelihoodFunctor {
     return -loglik;
   }
 
-  void Gradient(const arma::vec &parms, arma::vec &grad) override {
+  void Gradient(const arma::vec& parms, arma::vec& grad) override {
     // If no Y>0 observations, return zero gradient
     if (Y1.n_elem == 0) {
       grad = arma::zeros<arma::vec>(parms.n_elem);
@@ -183,7 +183,7 @@ class CountNegBinFunctor : public LikelihoodFunctor {
   arma::vec cached_logratio;
   bool cache_valid;
 
-  void compute_intermediates(const arma::vec &parms) {
+  void compute_intermediates(const arma::vec& parms) {
     int kx = X.n_cols;
     cached_eta = X_pos * parms.subvec(0, kx - 1) + offset_pos;
     cached_mu = exp(cached_eta);
@@ -214,8 +214,8 @@ class CountNegBinFunctor : public LikelihoodFunctor {
   }
 
  public:
-  CountNegBinFunctor(const arma::vec &y, const arma::mat &x,
-                     const arma::vec &offs, const arma::vec &w)
+  CountNegBinFunctor(const arma::vec& y, const arma::mat& x,
+                     const arma::vec& offs, const arma::vec& w)
       : LikelihoodFunctor(y, x, offs, w),
         cached_theta(0.0),
         cache_valid(false) {
@@ -223,15 +223,15 @@ class CountNegBinFunctor : public LikelihoodFunctor {
   }
 
   // Positive-only constructor: zero-copy alias of pre-subsetted Y>0 data.
-  CountNegBinFunctor(arma::vec &y_pos, arma::mat &x_pos, arma::vec &offs_pos,
-                     arma::vec &w_pos_in, PositiveOnlyTag tag)
+  CountNegBinFunctor(arma::vec& y_pos, arma::mat& x_pos, arma::vec& offs_pos,
+                     arma::vec& w_pos_in, PositiveOnlyTag tag)
       : LikelihoodFunctor(y_pos, x_pos, offs_pos, w_pos_in, tag),
         cached_theta(0.0),
         cache_valid(false) {
     build_y_caches();
   }
 
-  double operator()(const arma::vec &parms) override {
+  double operator()(const arma::vec& parms) override {
     // If no Y>0 observations, return 0
     if (Y1.n_elem == 0) {
       return 0.0;
@@ -261,7 +261,7 @@ class CountNegBinFunctor : public LikelihoodFunctor {
     return -loglik;
   }
 
-  void Gradient(const arma::vec &parms, arma::vec &grad) override {
+  void Gradient(const arma::vec& parms, arma::vec& grad) override {
     // Get number of parameters
     int kx = X.n_cols;
 
@@ -278,10 +278,10 @@ class CountNegBinFunctor : public LikelihoodFunctor {
     }
 
     // Use cached values
-    const arma::vec &eta = cached_eta;
-    const arma::vec &mu = cached_mu;
+    const arma::vec& eta = cached_eta;
+    const arma::vec& mu = cached_mu;
     double theta = cached_theta;
-    const arma::vec &logratio = cached_logratio;
+    const arma::vec& logratio = cached_logratio;
 
     // Vectorized gradient calculation for beta parameters
     arma::vec mu_plus_theta = mu + theta;
@@ -336,10 +336,10 @@ struct ZtnbFimResult {
 
 // Compute expected Fisher information components for zero-truncated NB model.
 // Uses PMF recurrence (no lgamma in inner loop). Cost: O(n_pos * avg_y_max).
-ZtnbFimResult compute_ztnb_fim_components(const arma::vec &beta, double theta,
-                                          const arma::mat &X_pos,
-                                          const arma::vec &offset_pos,
-                                          const arma::vec &w_pos,
+ZtnbFimResult compute_ztnb_fim_components(const arma::vec& beta, double theta,
+                                          const arma::mat& X_pos,
+                                          const arma::vec& offset_pos,
+                                          const arma::vec& w_pos,
                                           double quantile_cutoff = 0.9999) {
   int n_pos = X_pos.n_rows;
   double log_theta = std::log(theta);
@@ -407,7 +407,7 @@ ZtnbFimResult compute_ztnb_fim_components(const arma::vec &beta, double theta,
 }
 
 // Assemble FIM matrix from components. Returns (kx+1) x (kx+1) matrix.
-arma::mat assemble_fim(const ZtnbFimResult &comp, const arma::mat &X_pos) {
+arma::mat assemble_fim(const ZtnbFimResult& comp, const arma::mat& X_pos) {
   int kx = X_pos.n_cols;
   int np = kx + 1;
   arma::mat fim(np, np, arma::fill::zeros);
@@ -422,10 +422,10 @@ arma::mat assemble_fim(const ZtnbFimResult &comp, const arma::mat &X_pos) {
 }
 
 // Convenience wrapper: returns the assembled FIM directly.
-arma::mat compute_ztnb_fisher_info(const arma::vec &beta, double theta,
-                                   const arma::mat &X_pos,
-                                   const arma::vec &offset_pos,
-                                   const arma::vec &w_pos,
+arma::mat compute_ztnb_fisher_info(const arma::vec& beta, double theta,
+                                   const arma::mat& X_pos,
+                                   const arma::vec& offset_pos,
+                                   const arma::vec& w_pos,
                                    double quantile_cutoff = 0.9999) {
   auto comp = compute_ztnb_fim_components(beta, theta, X_pos, offset_pos, w_pos,
                                           quantile_cutoff);
@@ -449,9 +449,9 @@ arma::mat compute_ztnb_fisher_info(const arma::vec &beta, double theta,
 // Cost: O(n_pos) per-observation loop (no PMF recurrence), plus O(n_pos*p²)
 // for X'WX assembly via assemble_fim().
 ZtnbFimResult compute_ztnb_observed_hessian_components(
-    const arma::vec &beta, double theta, const arma::mat &X_pos,
-    const arma::vec &offset_pos, const arma::vec &w_pos,
-    const arma::vec &Y_pos) {
+    const arma::vec& beta, double theta, const arma::mat& X_pos,
+    const arma::vec& offset_pos, const arma::vec& w_pos,
+    const arma::vec& Y_pos) {
   int n_pos = X_pos.n_rows;
   double log_theta = std::log(theta);
 
@@ -550,12 +550,12 @@ ZtnbFimResult compute_ztnb_observed_hessian_components(
 }
 
 // Convenience wrapper: compute analytical observed Hessian, assembled.
-arma::mat compute_ztnb_observed_info_analytical(const arma::vec &beta,
+arma::mat compute_ztnb_observed_info_analytical(const arma::vec& beta,
                                                 double theta,
-                                                const arma::mat &X_pos,
-                                                const arma::vec &offset_pos,
-                                                const arma::vec &w_pos,
-                                                const arma::vec &Y_pos) {
+                                                const arma::mat& X_pos,
+                                                const arma::vec& offset_pos,
+                                                const arma::vec& w_pos,
+                                                const arma::vec& Y_pos) {
   auto comp = compute_ztnb_observed_hessian_components(
       beta, theta, X_pos, offset_pos, w_pos, Y_pos);
   return assemble_fim(comp, X_pos);
@@ -581,8 +581,8 @@ struct ScoreAndHessianResult {
 };
 
 ScoreAndHessianResult compute_score_and_hessian_nb(
-    const arma::vec &beta_full, double theta, const arma::mat &X_pos,
-    const arma::vec &off_pos, const arma::vec &w_pos, const arma::vec &Y_pos,
+    const arma::vec& beta_full, double theta, const arma::mat& X_pos,
+    const arma::vec& off_pos, const arma::vec& w_pos, const arma::vec& Y_pos,
     int kx_null, bool store_spa_intermediates = false) {
   int n_pos = X_pos.n_rows;
   double log_theta = std::log(theta);
@@ -705,7 +705,7 @@ ScoreAndHessianResult compute_score_and_hessian_nb(
 // = d(grad)/dparms, i.e., the observed info is the Jacobian of the
 // negative-loglik gradient.
 template <typename Functor>
-arma::mat compute_observed_info(Functor &functor, const arma::vec &parms,
+arma::mat compute_observed_info(Functor& functor, const arma::vec& parms,
                                 double eps_base = 1e-5) {
   int np = parms.n_elem;
   arma::mat H(np, np);
@@ -735,10 +735,10 @@ arma::mat compute_observed_info(Functor &functor, const arma::vec &parms,
 
 // R-exported test wrapper. Takes full data; filters to Y>0 internally.
 // [[Rcpp::export]]
-arma::mat compute_ztnb_fisher_info_cpp(const arma::vec &beta, double theta,
-                                       const arma::mat &X,
-                                       const arma::vec &offsetx,
-                                       const arma::vec &weights) {
+arma::mat compute_ztnb_fisher_info_cpp(const arma::vec& beta, double theta,
+                                       const arma::mat& X,
+                                       const arma::vec& offsetx,
+                                       const arma::vec& weights) {
   // Filter to positive observations (FIM is only over Y>0)
   // For the test export, we assume all rows are Y>0 (caller pre-filters)
   return compute_ztnb_fisher_info(beta, theta, X, offsetx, weights);
@@ -752,19 +752,19 @@ class CountGeomFunctor : public LikelihoodFunctor {
   std::shared_ptr<CountNegBinFunctor> negbin_functor;
 
  public:
-  CountGeomFunctor(const arma::vec &y, const arma::mat &x,
-                   const arma::vec &offs, const arma::vec &w)
+  CountGeomFunctor(const arma::vec& y, const arma::mat& x,
+                   const arma::vec& offs, const arma::vec& w)
       : LikelihoodFunctor(y, x, offs, w),
         negbin_functor(std::make_shared<CountNegBinFunctor>(y, x, offs, w)) {}
 
   // Positive-only constructor: zero-copy alias
-  CountGeomFunctor(arma::vec &y_pos, arma::mat &x_pos, arma::vec &offs_pos,
-                   arma::vec &w_pos_in, PositiveOnlyTag tag)
+  CountGeomFunctor(arma::vec& y_pos, arma::mat& x_pos, arma::vec& offs_pos,
+                   arma::vec& w_pos_in, PositiveOnlyTag tag)
       : LikelihoodFunctor(y_pos, x_pos, offs_pos, w_pos_in, tag),
         negbin_functor(std::make_shared<CountNegBinFunctor>(
             y_pos, x_pos, offs_pos, w_pos_in, tag)) {}
 
-  double operator()(const arma::vec &parms) override {
+  double operator()(const arma::vec& parms) override {
     // Create a new parameter vector with an additional element for theta = 1
     // (log(theta) = 0)
     arma::vec parms_extended(parms.n_elem + 1);
@@ -775,7 +775,7 @@ class CountGeomFunctor : public LikelihoodFunctor {
     return (*negbin_functor)(parms_extended);
   }
 
-  void Gradient(const arma::vec &parms, arma::vec &grad) override {
+  void Gradient(const arma::vec& parms, arma::vec& grad) override {
     // Create a new parameter vector with an additional element for theta = 1
     // (log(theta) = 0)
     arma::vec parms_extended(parms.n_elem + 1);
@@ -796,11 +796,11 @@ class CountGeomFunctor : public LikelihoodFunctor {
 // Zero hurdle Poisson functor
 class ZeroPoissonFunctor : public LikelihoodFunctor {
  public:
-  ZeroPoissonFunctor(const arma::vec &y, const arma::mat &x,
-                     const arma::vec &offs, const arma::vec &w)
+  ZeroPoissonFunctor(const arma::vec& y, const arma::mat& x,
+                     const arma::vec& offs, const arma::vec& w)
       : LikelihoodFunctor(y, x, offs, w) {}
 
-  double operator()(const arma::vec &parms) override {
+  double operator()(const arma::vec& parms) override {
     // Calculate mu = exp(X * parms + offset)
     arma::vec eta = calculate_eta(parms);
     arma::vec mu = calculate_mu(eta);
@@ -826,7 +826,7 @@ class ZeroPoissonFunctor : public LikelihoodFunctor {
     return -loglik;
   }
 
-  void Gradient(const arma::vec &parms, arma::vec &grad) override {
+  void Gradient(const arma::vec& parms, arma::vec& grad) override {
     // Calculate eta = X * parms + offset
     arma::vec eta = calculate_eta(parms);
 
@@ -861,11 +861,11 @@ class ZeroPoissonFunctor : public LikelihoodFunctor {
 // Zero hurdle Negative Binomial functor
 class ZeroNegBinFunctor : public LikelihoodFunctor {
  public:
-  ZeroNegBinFunctor(const arma::vec &y, const arma::mat &x,
-                    const arma::vec &offs, const arma::vec &w)
+  ZeroNegBinFunctor(const arma::vec& y, const arma::mat& x,
+                    const arma::vec& offs, const arma::vec& w)
       : LikelihoodFunctor(y, x, offs, w) {}
 
-  double operator()(const arma::vec &parms) override {
+  double operator()(const arma::vec& parms) override {
     // Get number of parameters
     int kz = X.n_cols;
 
@@ -896,7 +896,7 @@ class ZeroNegBinFunctor : public LikelihoodFunctor {
     return -loglik;
   }
 
-  void Gradient(const arma::vec &parms, arma::vec &grad) override {
+  void Gradient(const arma::vec& parms, arma::vec& grad) override {
     // Get number of parameters
     int kz = X.n_cols;
 
@@ -957,12 +957,12 @@ class ZeroGeomFunctor : public LikelihoodFunctor {
   std::shared_ptr<ZeroNegBinFunctor> negbin_functor;
 
  public:
-  ZeroGeomFunctor(const arma::vec &y, const arma::mat &x, const arma::vec &offs,
-                  const arma::vec &w)
+  ZeroGeomFunctor(const arma::vec& y, const arma::mat& x, const arma::vec& offs,
+                  const arma::vec& w)
       : LikelihoodFunctor(y, x, offs, w),
         negbin_functor(std::make_shared<ZeroNegBinFunctor>(y, x, offs, w)) {}
 
-  double operator()(const arma::vec &parms) override {
+  double operator()(const arma::vec& parms) override {
     // Create a new parameter vector with an additional element for theta = 1
     // (log(theta) = 0)
     arma::vec parms_extended(parms.n_elem + 1);
@@ -973,7 +973,7 @@ class ZeroGeomFunctor : public LikelihoodFunctor {
     return (*negbin_functor)(parms_extended);
   }
 
-  void Gradient(const arma::vec &parms, arma::vec &grad) override {
+  void Gradient(const arma::vec& parms, arma::vec& grad) override {
     // Create a new parameter vector with an additional element for theta = 1
     // (log(theta) = 0)
     arma::vec parms_extended(parms.n_elem + 1);
@@ -1003,9 +1003,9 @@ class ZeroBinomFunctor : public LikelihoodFunctor {
   arma::vec Y_binary;
 
  public:
-  ZeroBinomFunctor(const arma::vec &y, const arma::mat &x,
-                   const arma::vec &offs, const arma::vec &w,
-                   const std::string &link = "logit")
+  ZeroBinomFunctor(const arma::vec& y, const arma::mat& x,
+                   const arma::vec& offs, const arma::vec& w,
+                   const std::string& link = "logit")
       : LikelihoodFunctor(y, x, offs, w),
         link_name(link),
         is_logit(link == "logit") {
@@ -1018,7 +1018,7 @@ class ZeroBinomFunctor : public LikelihoodFunctor {
     }
   }
 
-  double operator()(const arma::vec &parms) override {
+  double operator()(const arma::vec& parms) override {
     // Calculate eta = X * parms + offset
     arma::vec eta = calculate_eta(parms);
 
@@ -1062,7 +1062,7 @@ class ZeroBinomFunctor : public LikelihoodFunctor {
     return -loglik;
   }
 
-  void Gradient(const arma::vec &parms, arma::vec &grad) override {
+  void Gradient(const arma::vec& parms, arma::vec& grad) override {
     // Calculate eta = X * parms + offset
     arma::vec eta = calculate_eta(parms);
 
@@ -1118,7 +1118,7 @@ class JointFunctor : public Functor {
     (void)zero_is_negbin;
   }
 
-  double operator()(const arma::vec &parms) override {
+  double operator()(const arma::vec& parms) override {
     // Split parameters for count and zero components
     arma::vec count_parms = parms.subvec(0, kx + (dist_negbin ? 0 : -1));
     arma::vec zero_parms =
@@ -1132,7 +1132,7 @@ class JointFunctor : public Functor {
     return count_loglik + zero_loglik;
   }
 
-  void Gradient(const arma::vec &parms, arma::vec &grad) override {
+  void Gradient(const arma::vec& parms, arma::vec& grad) override {
     // Split parameters for count and zero components
     arma::vec count_parms = parms.subvec(0, kx + (dist_negbin ? 0 : -1));
     arma::vec zero_parms =
@@ -1152,8 +1152,8 @@ class JointFunctor : public Functor {
 
 // Helper function to run optimization with any functor type
 template <typename FunctorType>
-Rcpp::List run_optimization(FunctorType &functor, arma::vec &start,
-                            const std::string &method = "BFGS",
+Rcpp::List run_optimization(FunctorType& functor, arma::vec& start,
+                            const std::string& method = "BFGS",
                             bool hessian = true, int maxit = 10000,
                             double reltol = -1.0) {
   // Create optimizer
@@ -1183,10 +1183,10 @@ Rcpp::List run_optimization(FunctorType &functor, arma::vec &start,
 // R interface functions for optimization using roptim
 
 // [[Rcpp::export]]
-Rcpp::List optim_count_poisson_cpp(const arma::vec &start, const arma::vec &Y,
-                                   const arma::mat &X, const arma::vec &offsetx,
-                                   const arma::vec &weights,
-                                   const std::string &method = "BFGS",
+Rcpp::List optim_count_poisson_cpp(const arma::vec& start, const arma::vec& Y,
+                                   const arma::mat& X, const arma::vec& offsetx,
+                                   const arma::vec& weights,
+                                   const std::string& method = "BFGS",
                                    bool hessian = true, int maxit = 10000,
                                    double reltol = -1.0) {
   // Create functor
@@ -1198,10 +1198,10 @@ Rcpp::List optim_count_poisson_cpp(const arma::vec &start, const arma::vec &Y,
 }
 
 // [[Rcpp::export]]
-Rcpp::List optim_count_negbin_cpp(const arma::vec &start, const arma::vec &Y,
-                                  const arma::mat &X, const arma::vec &offsetx,
-                                  const arma::vec &weights,
-                                  const std::string &method = "BFGS",
+Rcpp::List optim_count_negbin_cpp(const arma::vec& start, const arma::vec& Y,
+                                  const arma::mat& X, const arma::vec& offsetx,
+                                  const arma::vec& weights,
+                                  const std::string& method = "BFGS",
                                   bool hessian = true, int maxit = 10000,
                                   double reltol = -1.0) {
   CountNegBinFunctor functor(Y, X, offsetx, weights);
@@ -1210,10 +1210,10 @@ Rcpp::List optim_count_negbin_cpp(const arma::vec &start, const arma::vec &Y,
 }
 
 // [[Rcpp::export]]
-Rcpp::List optim_count_geom_cpp(const arma::vec &start, const arma::vec &Y,
-                                const arma::mat &X, const arma::vec &offsetx,
-                                const arma::vec &weights,
-                                const std::string &method = "BFGS",
+Rcpp::List optim_count_geom_cpp(const arma::vec& start, const arma::vec& Y,
+                                const arma::mat& X, const arma::vec& offsetx,
+                                const arma::vec& weights,
+                                const std::string& method = "BFGS",
                                 bool hessian = true, int maxit = 10000,
                                 double reltol = -1.0) {
   // Create functor
@@ -1225,10 +1225,10 @@ Rcpp::List optim_count_geom_cpp(const arma::vec &start, const arma::vec &Y,
 }
 
 // [[Rcpp::export]]
-Rcpp::List optim_zero_poisson_cpp(const arma::vec &start, const arma::vec &Y,
-                                  const arma::mat &X, const arma::vec &offsetx,
-                                  const arma::vec &weights,
-                                  const std::string &method = "BFGS",
+Rcpp::List optim_zero_poisson_cpp(const arma::vec& start, const arma::vec& Y,
+                                  const arma::mat& X, const arma::vec& offsetx,
+                                  const arma::vec& weights,
+                                  const std::string& method = "BFGS",
                                   bool hessian = true, int maxit = 10000,
                                   double reltol = -1.0) {
   // Create functor
@@ -1240,10 +1240,10 @@ Rcpp::List optim_zero_poisson_cpp(const arma::vec &start, const arma::vec &Y,
 }
 
 // [[Rcpp::export]]
-Rcpp::List optim_zero_negbin_cpp(const arma::vec &start, const arma::vec &Y,
-                                 const arma::mat &X, const arma::vec &offsetx,
-                                 const arma::vec &weights,
-                                 const std::string &method = "BFGS",
+Rcpp::List optim_zero_negbin_cpp(const arma::vec& start, const arma::vec& Y,
+                                 const arma::mat& X, const arma::vec& offsetx,
+                                 const arma::vec& weights,
+                                 const std::string& method = "BFGS",
                                  bool hessian = true, int maxit = 10000,
                                  double reltol = -1.0) {
   // Create functor
@@ -1255,10 +1255,10 @@ Rcpp::List optim_zero_negbin_cpp(const arma::vec &start, const arma::vec &Y,
 }
 
 // [[Rcpp::export]]
-Rcpp::List optim_zero_geom_cpp(const arma::vec &start, const arma::vec &Y,
-                               const arma::mat &X, const arma::vec &offsetx,
-                               const arma::vec &weights,
-                               const std::string &method = "BFGS",
+Rcpp::List optim_zero_geom_cpp(const arma::vec& start, const arma::vec& Y,
+                               const arma::mat& X, const arma::vec& offsetx,
+                               const arma::vec& weights,
+                               const std::string& method = "BFGS",
                                bool hessian = true, int maxit = 10000,
                                double reltol = -1.0) {
   // Create functor
@@ -1270,11 +1270,11 @@ Rcpp::List optim_zero_geom_cpp(const arma::vec &start, const arma::vec &Y,
 }
 
 // [[Rcpp::export]]
-Rcpp::List optim_zero_binom_cpp(const arma::vec &start, const arma::vec &Y,
-                                const arma::mat &X, const arma::vec &offsetx,
-                                const arma::vec &weights,
-                                const std::string &link = "logit",
-                                const std::string &method = "BFGS",
+Rcpp::List optim_zero_binom_cpp(const arma::vec& start, const arma::vec& Y,
+                                const arma::mat& X, const arma::vec& offsetx,
+                                const arma::vec& weights,
+                                const std::string& link = "logit",
+                                const std::string& method = "BFGS",
                                 bool hessian = true, int maxit = 10000,
                                 double reltol = -1.0) {
   // Create functor with C++ link function
@@ -1287,11 +1287,11 @@ Rcpp::List optim_zero_binom_cpp(const arma::vec &start, const arma::vec &Y,
 
 // [[Rcpp::export]]
 Rcpp::List optim_joint_cpp(
-    const arma::vec &start, const arma::vec &Y, const arma::mat &X,
-    const arma::vec &offsetx, const arma::mat &Z, const arma::vec &offsetz,
-    const arma::vec &weights, const std::string &dist = "poisson",
-    const std::string &zero_dist = "binomial",
-    const std::string &link = "logit", const std::string &method = "BFGS",
+    const arma::vec& start, const arma::vec& Y, const arma::mat& X,
+    const arma::vec& offsetx, const arma::mat& Z, const arma::vec& offsetz,
+    const arma::vec& weights, const std::string& dist = "poisson",
+    const std::string& zero_dist = "binomial",
+    const std::string& link = "logit", const std::string& method = "BFGS",
     bool hessian = true, int maxit = 10000, double reltol = -1.0) {
   // Create count functor based on distribution
   std::shared_ptr<LikelihoodFunctor> count_functor;
