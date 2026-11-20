@@ -266,7 +266,7 @@ GPL-2
 
 ## Citation
 
-Kanai, M. et al. [Population-scale multiome immune cell atlas reveals complex disease drivers](https://doi.org/10.1101/2025.11.25.25340489). medRxiv (2025)
+Kanai, M. et al. [Population-scale immune multiome atlas reveals regulatory disease mechanisms](https://doi.org/10.1038/s41586-026-11078-2). _Nature_ **659**, 729–743 (2026)
 
 ## Contact
 
